@@ -1,0 +1,16 @@
+# Core (required by both backends)
+numpy>=1.23
+torch>=2.0
+matplotlib>=3.6
+
+# ODL + ASTRA backend (operators_odl.py, production tomography).
+# ASTRA is best installed via conda:  conda install -c astra-toolbox astra-toolbox
+# scikit-image provides the CPU RayTransform fallback used by ODL.
+odl>=1.0.0
+scikit-image>=0.20
+
+# Notes
+# -----
+# * The pure-PyTorch backend (operators_torch.py) needs only numpy/torch/matplotlib.
+# * astra-toolbox is not on PyPI for all platforms; prefer conda. The ODL backend
+#   falls back astra_cuda -> astra_cpu -> skimage automatically.
