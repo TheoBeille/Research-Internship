@@ -20,9 +20,9 @@ def ensure_4d(x):
     return x.float()
 
 
-def _make_ray_transform(U, n_angles):
+def _make_ray_transform(U, angle_partition,detector_partition):
     """Parallel-beam ray transform, trying the available ASTRA/skimage impls."""
-    geometry = parallel_beam_geometry(U, num_angles=n_angles)
+    geometry = odl.tomo.Parallel2dGeometry(angle_partition, detector_partition)
     last_err = None
     for impl in ("astra_cuda", "astra_cpu", "skimage"):
         try:
@@ -67,10 +67,11 @@ def get_setup(size, n_angles=180, seed=0, noise_level=0.0, device=None):
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
    
-    U = odl.uniform_discr([0, 0], [size, size], [size, size], dtype='float32')
-
-    A = _make_ray_transform(U, n_angles)
-    #A=odl.IdentityOperator(U)
+    U = odl.uniform_discr([-64, -64], [64, 64], [size, size], dtype='float32')
+    angle_partition = odl.uniform_partition(0, 2 * np.pi, 1000)
+    detector_partition = odl.uniform_partition(-360, 360, 1000)
+    A = _make_ray_transform(U, angle_partition,detector_partition)
+   
     phantom = odl.phantom.tgv_phantom(U)
 
     D  = odl.Gradient(U, method='forward', pad_mode='symmetric')

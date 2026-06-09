@@ -1,9 +1,9 @@
 import torch
 import torch.nn as nn
-from algorithm.fbs_step import one_step
-from algorithm.normalization import block_norm_sq
+from NN_tomo.algorithm.fbs_step import one_step
+from NN_tomo.algorithm.normalization import block_norm_sq
 import random
-from models.deviation_net import DeviationNet
+from NN_tomo.models.deviation_net import DeviationNet
 
 
 class UnrolledFBS(nn.Module):
@@ -17,7 +17,7 @@ class UnrolledFBS(nn.Module):
         -> next iteration
     """
 
-    def __init__(self, params, shapes, n_channels, T=20, net_hidden=64, net_blocks=8, alpha=0.99):
+    def __init__(self, params, shapes, n_channels, T=5, net_hidden=64, net_blocks=8, alpha=0.99):
         super().__init__()
 
         self.params = params
@@ -129,7 +129,6 @@ class UnrolledFBS(nn.Module):
                 u_prev=u_prev,
                 v_prev=v_prev,
                 Cy=Cy,
-                n=n,
             )
 
             u_raw_norm = block_norm_sq(u_raw).sqrt().clamp(min=1e-6)

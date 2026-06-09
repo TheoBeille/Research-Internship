@@ -153,8 +153,8 @@ def run_pdhg(setup, params, niter=300, verbose=False, obj_fn=None):
 
 if __name__ == "__main__":
 
-    from Algo_setuptorch import Params, get_setup
-    from PSNR import psnr_history
+    from NN_tomo.Algo_setuptorch import Params, get_setup
+    from NN_tomo.PSNR import psnr_history
 
     SIZE, N_ANGLES = 128, 180
     params = Params(size=SIZE)

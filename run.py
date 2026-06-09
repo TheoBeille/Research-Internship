@@ -1,8 +1,8 @@
 
 import numpy as np
 import torch
-from algorithm.fbs_step import one_step
-from algorithm.normalization import block_norm_sq
+from NN_tomo.algorithm.fbs_step import one_step
+from NN_tomo.algorithm.normalization import block_norm_sq
 
 
 
@@ -60,7 +60,6 @@ def run_learned(model, initial_state, clean, functions, T_test=500, return_all=F
                 u_prev=u_prev,
                 v_prev=v_prev,
                 Cy=Cy,
-                n=n,
             )
             
             # same as in UnrolledFBS.forward, right after dev_net
@@ -185,8 +184,8 @@ def run_zero(initial_state,functions, params, shapes, T, device):
 
 def run_random(initial_state, functions, params, shapes, T=100, device='cuda', alpha=0.99, seed=0):
 
-    from algorithm.fbs_step import one_step
-    from algorithm.normalization import block_norm_sq
+    from NN_tomo.algorithm.fbs_step import one_step
+    from NN_tomo.algorithm.normalization import block_norm_sq
 
     torch.manual_seed(seed)
     B = initial_state.shape[0]

@@ -1,3 +1,19 @@
+# Python
 __pycache__/
-*.pyc
+*.py[cod]
+*.egg-info/
+.ipynb_checkpoints/
+
+# Outputs
+plots/
+checkpoint_tomo.pt
+checkpoints/
+*.log
+
+# Cached high-accuracy reference solutions (recomputed on demand)
+references/
+
+# Env
+.venv/
+venv/
 .DS_Store

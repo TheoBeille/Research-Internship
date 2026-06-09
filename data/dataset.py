@@ -1,7 +1,7 @@
 import numpy as np
 import torch
 
-from Algo_setuptorch import get_setup, build_algo_functions
+from NN_tomo.Algo_setuptorch import get_setup, build_algo_functions
 
 
 def load_sample(size, seed, params, device, n_angles=180,

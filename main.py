@@ -1,17 +1,24 @@
-#%% Run to have everything  --  TOMOGRAPHY
+#%% Run to have everything  --  TOMOGRAPHY  (train ALL gammas, no-time net)
 
 import torch
 import numpy as np
 import matplotlib.pyplot as plt
 
-from Algo_setuptorch import Params
-from data.dataset import build_train_test_data
-from algorithm.unrolled_model import UnrolledFBS
-from training.train import train
-from plots import plot_convergence_2, train_plot
-from run import run_zero, run_learned
-from PSNR import psnr_history
+from NN_tomo.Algo_setuptorch import Params
+from NN_tomo.data.dataset import build_train_test_data
+from NN_tomo.algorithm.unrolled_model import UnrolledFBS
+from NN_tomo.training.train import train
+from NN_tomo.plots import (
+    apply_paper_style,
+    plot_convergence_2,
+    plot_convergence_multi_gamma,
+    train_plot,
+)
+from NN_tomo.run import run_zero, run_learned
+from NN_tomo.PSNR import psnr_history
 
+
+apply_paper_style()
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Device: {device}")
@@ -32,6 +39,23 @@ N_CH_primal = sum(s[1] for s in SHAPES[:2])    # = 3
 TRAIN_SEEDS = list(range(40))
 TEST_SEEDS = list(range(1000, 1008))
 
+# --- training config ---------------------------------------------------------
+
+T = 5
+N_EPOCHS = 70
+LR = 1e-3
+
+GAMMAS = [0.1, 1.0, 1.8, 2.0]
+
+
+def gamma_tag(g):
+    """Filename tag matching the existing checkpoints (0.1 -> 01, 1.0 -> 1)."""
+    if abs(g - round(g)) < 1e-9:
+        return str(int(round(g)))
+    s = ("%g" % g)
+    return s.replace("0.", "0") if s.startswith("0.") else s
+
+
 train_data, test_data = build_train_test_data(
     train_seeds=TRAIN_SEEDS,
     test_seeds=TEST_SEEDS,
@@ -41,55 +65,87 @@ train_data, test_data = build_train_test_data(
 )
 
 initial_state, clean, functions = test_data[0]
-print(f"gamma = {params.gamma0:.4f}   beta_bar = {params.beta_bar:.3f}   "
-      f"(gamma*||B|| = 0.7 < 1 by construction)")
-
-#%% 1) ZERO-DEVIATION BASELINE  (the acceptance test: must converge alone) -----
-print("\n[run_zero] baseline ...")
-AxCx_zero, _res, x_hist = run_zero(
-    initial_state, functions, params, SHAPES, T=100, device=device)
-rec0 = x_hist[-1][0]
-psnr0 = psnr_history([rec0], clean)[0]
-print(f"  KKT {AxCx_zero[0]:.3e} -> {AxCx_zero[-1]:.3e}   PSNR = {psnr0:.2f} dB")
+coc_max = 2.0 / (params.lam0 * params.beta_bar)
+print(f"beta_bar = {params.beta_bar:.3f}   "
+      f"2/(lam0*beta_bar) = {coc_max:.4f}  (gamma must be < this)")
 
 
-#%% 2) TRAIN THE UNROLLED MODEL (learned, safeguarded deviations) --------------
-model = UnrolledFBS(
-    params=params,
-    shapes=SHAPES,
-    n_channels=N_CH_primal,
-    T=10,
-    alpha=0.99,
-).to(device).float()
+#%% Baseline (zero-deviation) per gamma + train one model per gamma -----------
+curves_zero = {}
+curves_learned = {}
 
-from reference import load_reference
+for g in GAMMAS:
+    tag = gamma_tag(g)
+    print("\n" + "=" * 70)
+    print(f"GAMMA = {g}   (checkpoint tag '{tag}')")
+    print("=" * 70)
+
+    # switch gamma everywhere (resolvent, theta, delta all read params.gamma)
+    params.gamma0 = g
+
+    # --- zero-deviation baseline --------------------------------------------
+    print("[run_zero] baseline ...")
+    AxCx_zero, _res, x_hist = run_zero(
+        initial_state, functions, params, SHAPES, T=100, device=device)
+    rec0 = x_hist[-1][0]
+    psnr0 = psnr_history([rec0], clean)[0]
+    print(f"  KKT {AxCx_zero[0]:.3e} -> {AxCx_zero[-1]:.3e}   PSNR = {psnr0:.2f} dB")
+    curves_zero[g] = np.asarray(AxCx_zero)
+
+    # --- train the unrolled model (new no-time architecture, T=5) -----------
+    model = UnrolledFBS(
+        params=params,
+        shapes=SHAPES,
+        n_channels=N_CH_primal,
+        T=T,
+        alpha=0.99,
+    ).to(device).float()
+
+    model, train_hist, val_hist = train(
+        model=model,
+        train_data=train_data,
+        val_data=test_data,
+        n_epochs=N_EPOCHS,
+        lr=LR,
+        device=device,
+        print_every=5,
+    )
+
+    ckpt_path = f"checkpoint_tomo_128_gamma_{tag}.pt"
+    torch.save(
+        {
+            "model": model.state_dict(),
+            "train_loss_history": train_hist,
+            "val_loss_history": val_hist,
+            "lr": LR,
+            "epochs": N_EPOCHS,
+            "gamma": g,
+            "T": T,
+        },
+        ckpt_path,
+    )
+    print(f"  saved {ckpt_path}")
+
+    # --- learned convergence + per-gamma figures ----------------------------
+    print("[run_learned] ...")
+    AxCx_learned, _ = run_learned(
+        model, initial_state, clean, functions, T_test=100)
+    curves_learned[g] = np.asarray(AxCx_learned)
+
+    plot_convergence_2(
+        AxCx_zero, AxCx_learned, label3="learned",
+        title=f"Convergence_tomo_gamma_{tag}")
+    train_plot(
+        train_hist, val_hist,
+        title=f"Training_Validation_tomo_gamma_{tag}")
+
+# restore automatic gamma
+params.gamma0 = 0.85 * coc_max
 
 
-model, train_hist, val_hist = train(
-    model=model,
-    train_data=train_data,
-    val_data=test_data,
-    n_epochs=70,
-    lr=1e-3,
-    device=device,
-    print_every=5,
-          # loss = ||u_T - u*|| / ||u*||
-)
+#%% Combined multi-gamma figure ----------------------------------------------
+plot_convergence_multi_gamma(
+    curves_zero, curves_learned, title="Convergence_all_gamma")
 
-checkpoint = {
-    "model": model.state_dict(),
-    "train_loss_history": train_hist,
-    "val_loss_history": val_hist,
-    "lr": 1e-3,
-    "epochs": 100,
-}
-torch.save(checkpoint, "checkpoint_tomo_128_gamma_1.pt")
-
-#%% 3) LEARNED CONVERGENCE + FIGURES ------------------------------------------
-print("\n[run_learned] ...")
-AxCx_learned, _ = run_learned(model, initial_state, clean, functions, T_test=100)
-
-plot_convergence_2(AxCx_zero, AxCx_learned, label3="learned",
-                   title="Convergence_tomo")
-train_plot(train_hist, val_hist, title="Training_Validation_tomo")
-print("\nDone. Figures in ./plots, checkpoint in ./checkpoint_tomo.pt")
+print("\nDone. Per-gamma + combined figures in ./plots, "
+      "checkpoints checkpoint_tomo_128_gamma_*.pt")
