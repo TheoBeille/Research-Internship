@@ -4,18 +4,18 @@ import torch
 import numpy as np
 import matplotlib.pyplot as plt
 
-from NN_tomo.Algo_setuptorch import Params
-from NN_tomo.data.dataset import build_train_test_data
-from NN_tomo.algorithm.unrolled_model import UnrolledFBS
-from NN_tomo.training.train import train
-from NN_tomo.plots import (
+from Algo_setuptorch import Params
+from data.dataset import build_train_test_data
+from algorithm.unrolled_model import UnrolledFBS
+from training.train import train
+from plots import (
     apply_paper_style,
     plot_convergence_2,
     plot_convergence_multi_gamma,
     train_plot,
 )
-from NN_tomo.run import run_zero, run_learned
-from NN_tomo.PSNR import psnr_history
+from run import run_zero, run_learned
+from PSNR import psnr_history
 
 
 apply_paper_style()
@@ -39,7 +39,6 @@ N_CH_primal = sum(s[1] for s in SHAPES[:2])    # = 3
 TRAIN_SEEDS = list(range(40))
 TEST_SEEDS = list(range(1000, 1008))
 
-# --- training config ---------------------------------------------------------
 
 T = 5
 N_EPOCHS = 70
@@ -80,10 +79,8 @@ for g in GAMMAS:
     print(f"GAMMA = {g}   (checkpoint tag '{tag}')")
     print("=" * 70)
 
-    # switch gamma everywhere (resolvent, theta, delta all read params.gamma)
     params.gamma0 = g
 
-    # --- zero-deviation baseline --------------------------------------------
     print("[run_zero] baseline ...")
     AxCx_zero, _res, x_hist = run_zero(
         initial_state, functions, params, SHAPES, T=100, device=device)
@@ -92,7 +89,6 @@ for g in GAMMAS:
     print(f"  KKT {AxCx_zero[0]:.3e} -> {AxCx_zero[-1]:.3e}   PSNR = {psnr0:.2f} dB")
     curves_zero[g] = np.asarray(AxCx_zero)
 
-    # --- train the unrolled model (new no-time architecture, T=5) -----------
     model = UnrolledFBS(
         params=params,
         shapes=SHAPES,
@@ -126,7 +122,7 @@ for g in GAMMAS:
     )
     print(f"  saved {ckpt_path}")
 
-    # --- learned convergence + per-gamma figures ----------------------------
+
     print("[run_learned] ...")
     AxCx_learned, _ = run_learned(
         model, initial_state, clean, functions, T_test=100)
@@ -143,7 +139,7 @@ for g in GAMMAS:
 params.gamma0 = 0.85 * coc_max
 
 
-#%% Combined multi-gamma figure ----------------------------------------------
+
 plot_convergence_multi_gamma(
     curves_zero, curves_learned, title="Convergence_all_gamma")
 

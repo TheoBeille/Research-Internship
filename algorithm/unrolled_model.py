@@ -1,9 +1,9 @@
 import torch
 import torch.nn as nn
-from NN_tomo.algorithm.fbs_step import one_step
-from NN_tomo.algorithm.normalization import block_norm_sq
+from algorithm.fbs_step import one_step
+from algorithm.normalization import block_norm_sq
 import random
-from NN_tomo.models.deviation_net import DeviationNet
+from models.deviation_net import DeviationNet
 
 
 class UnrolledFBS(nn.Module):

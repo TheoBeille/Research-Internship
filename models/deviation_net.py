@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from NN_tomo.Algo_setuptorch import Params
+from Algo_setuptorch import Params
 
 params = Params()
 size = params.size

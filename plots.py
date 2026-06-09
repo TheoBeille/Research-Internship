@@ -6,11 +6,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 
-# ============================================================
-# Paper-style palette & styling
-# ============================================================
-# Muted, colorblind-friendly colors in the spirit of academic figures
-# (close to the Tableau "muted" / Wong palettes).
+
 
 PAPER = {
     "blue":    "#3B5BA5",   

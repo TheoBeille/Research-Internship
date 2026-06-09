@@ -1,6 +1,6 @@
 import torch
 
-from NN_tomo.training.loss import trajectory_loss
+from training.loss import trajectory_loss
 import os
 
 save_path = "./checkpoints"
