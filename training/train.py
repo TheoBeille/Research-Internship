@@ -1,6 +1,6 @@
 import torch
 
-from training.loss import trajectory_loss
+
 import os
 
 save_path = "./checkpoints"
@@ -52,7 +52,7 @@ def train(
             optimizer.zero_grad()
 
   
-            AxCx, residuals, x_final = model(initial_state, functions)
+            AxCx, residuals, objectives, x_final = model(initial_state, functions)
 
 
             loss   =  AxCx[-1]
@@ -88,8 +88,6 @@ def train(
 
         if epoch % print_every == 0:
             print(f"Epoch {epoch:4d} | Train loss = {epoch_loss:.6f}")
-        if epoch % 20 == 0:
-            torch.save(model.state_dict(), f"{save_path}/model_epoch_{epoch}.pt")
         
         if val_data is not None:
             model.eval()
@@ -98,9 +96,9 @@ def train(
             with torch.no_grad():
                 for initial_state, _, functions in val_data:
                     initial_state = initial_state.to(device)
-                    AxCx, residuals, x_final = model(initial_state, functions)
+                    AxCx, residuals, objectives, x_final = model(initial_state, functions)
 
-                    
+
                     loss   = AxCx[-1]
                     if torch.isfinite(loss):
                         val_loss += loss.item()

@@ -92,7 +92,6 @@ def run_learned(model, initial_state, clean, functions, T_test=500, return_all=F
             scale = model.alpha * ratio
 
 
-
                 
                 
             x, y_prev, p_prev, z_prev = x_new, y, p, z
@@ -139,8 +138,95 @@ def run_learned(model, initial_state, clean, functions, T_test=500, return_all=F
     return   AxCx,residuals
 
 
+def run_learned_nosafe(model, initial_state, clean, functions, T_test=500, return_all=False):
+    """Same unrolled scheme as `run_learned`, but WITHOUT the safeguarding.
 
-                
+    The learned deviations produced by `dev_net` are applied directly as
+    (u, v), with no budget/delta projection (no `scale = alpha * sqrt(zeta*delta/Q)`
+    rescaling). This is the "learned w/o convergence" variant from the paper
+    (Banert et al., Fig. 1): it has no convergence guarantee and is expected to
+    do well early on, then plateau/diverge.
+
+    NOTE: pass a model trained specifically WITHOUT safeguarding.
+    """
+    model.eval()
+
+    C = functions["C"]
+    RA = functions["RA"]
+
+    x, y_prev, p_prev, z_prev, u, v, u_prev, v_prev = model._init_state(initial_state)
+
+    residuals = []
+    AxCx = []
+
+    if return_all:
+        x_hist, y_hist, p_hist, z_hist = [], [], [], []
+        u_hist, v_hist = [], []
+
+    with torch.no_grad():
+        for n in range(T_test):
+            print(f'iter:{n}')
+
+            x_new, y, p, z, res = one_step(
+                x=x, y_prev=y_prev, p_prev=p_prev, z_prev=z_prev,
+                u=u, v=v, n=n, params=model.params, C=C, RA=RA,
+            )
+
+            x_new = [t.float() for t in x_new]
+            p = [t.float() for t in p]
+            y = [t.float() for t in y]
+            z = [t.float() for t in z]
+
+            Cy = C(y)
+
+            u_raw, v_raw = model.dev_net(
+                shapes=model.shapes,
+                x_blocks=x_new,
+                p_blocks=p,
+                y_blocks=y,
+                z_blocks=z,
+                u_prev=u_prev,
+                v_prev=v_prev,
+                Cy=Cy,
+            )
+
+            # --- NO SAFEGUARDING --------------------------------------------
+            # Apply the raw learned deviations directly (scaled only by alpha).
+            # No unit-sphere projection, no delta budget, no rescaling.
+            x, y_prev, p_prev, z_prev = x_new, y, p, z
+            u_prev = [u_i.clone() for u_i in u]
+            v_prev = [v_i.clone() for v_i in v]
+
+            u = [model.alpha * u_i for u_i in u_raw]
+            v = [model.alpha * v_i for v_i in v_raw]
+
+            res = torch.nan_to_num(res, nan=1e6, posinf=1e6, neginf=1e6)
+            residuals.append(res.item())
+            val = functions['kkt_residual_norm'](x)
+            print(val.item())
+            AxCx.append(val.item())
+
+            if return_all:
+                x_hist.append([t.clone() for t in x])
+                y_hist.append([t.clone() for t in y_prev])
+                p_hist.append([t.clone() for t in p_prev])
+                z_hist.append([t.clone() for t in z_prev])
+                u_hist.append([t.clone() for t in u])
+                v_hist.append([t.clone() for t in v])
+
+    if return_all:
+        history = {
+            "x": x_hist,
+            "y": y_hist,
+            "p": p_hist,
+            "z": z_hist,
+            "u": u_hist,
+            "v": v_hist,
+        }
+        return AxCx, residuals, history
+
+    return AxCx, residuals
+
 
 def run_zero(initial_state,functions, params, shapes, T, device):
     C = functions["C"]
@@ -184,8 +270,6 @@ def run_zero(initial_state,functions, params, shapes, T, device):
 
 def run_random(initial_state, functions, params, shapes, T=100, device='cuda', alpha=0.99, seed=0):
 
-    from algorithm.fbs_step import one_step
-    from algorithm.normalization import block_norm_sq
 
     torch.manual_seed(seed)
     B = initial_state.shape[0]

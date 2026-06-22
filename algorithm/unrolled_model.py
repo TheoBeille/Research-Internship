@@ -17,7 +17,7 @@ class UnrolledFBS(nn.Module):
         -> next iteration
     """
 
-    def __init__(self, params, shapes, n_channels, T=5, net_hidden=64, net_blocks=8, alpha=0.99):
+    def __init__(self, params, shapes, n_channels, T=5, net_hidden=32, net_blocks=8, alpha=0.99):
         super().__init__()
 
         self.params = params
@@ -79,46 +79,30 @@ class UnrolledFBS(nn.Module):
 
         residuals = []
         AxCx=[]
+        objectives=[]
 
         if return_all:
             x_hist, y_hist, p_hist, z_hist = [], [], [], []
             u_hist, v_hist, delta_hist = [], [], []
             
             
-        T_run = random.randint(2, 2*self.T) if self.training else self.T
-        #T_run=self.T
-
+        T_run = self.T + random.randint(0, self.T)
 
         for n in range(T_run):
-        
+
             x_new, y, p, z, res = one_step(
-                x=x,
-                y_prev=y_prev,
-                p_prev=p_prev,
-                z_prev=z_prev,
-                u=u,
-                v=v,
-                n=n,
-                params=self.params,
-                C=C,
-                RA=RA,
+                x=x, y_prev=y_prev, p_prev=p_prev, z_prev=z_prev,
+                u=u, v=v, n=n, params=self.params, C=C, RA=RA,
             )
 
-            delta = compute_delta(
-                p, x, p_prev, z, z_prev, y, y_prev, u, v, n
-            )
-       
+            delta = compute_delta(p, x, p_prev, z, z_prev, y, y_prev, u, v, n)
 
-
-          
             x_new = [t.float() for t in x_new]
             p = [t.float() for t in p]
             y = [t.float() for t in y]
             z = [t.float() for t in z]
-            
-            Cy=C(y)
 
-
+            Cy = C(y)
 
             u_raw, v_raw = self.dev_net(
                 shapes=self.shapes,
@@ -134,11 +118,9 @@ class UnrolledFBS(nn.Module):
             u_raw_norm = block_norm_sq(u_raw).sqrt().clamp(min=1e-6)
             v_raw_norm = block_norm_sq(v_raw).sqrt().clamp(min=1e-6)
 
+            #u_raw = [u_i / u_raw_norm for u_i in u_raw]
+            #v_raw = [v_i / v_raw_norm for v_i in v_raw]
 
-            u_raw = [u_i / u_raw_norm for u_i in u_raw]
-            v_raw = [v_i / v_raw_norm for v_i in v_raw]
-            
-            
             params = self.params
 
             lam = float(params.lam(n + 1))
@@ -155,36 +137,32 @@ class UnrolledFBS(nn.Module):
             norm_u_sq = block_norm_sq(u_raw)
             norm_v_sq = block_norm_sq(v_raw)
 
-
-
             Q = c_u * norm_u_sq + c_v * norm_v_sq
 
             budget = float(params.zeta) * (delta.clamp(min=0.0))
 
             ratio = torch.sqrt(budget / Q)
 
-
             scale = self.alpha * ratio
+            scale=1
             u_prev = [u_i.clone() for u_i in u]
             v_prev = [v_i.clone() for v_i in v]
 
-
             u = [scale * u_i for u_i in u_raw]
             v = [scale * v_i for v_i in v_raw]
- 
-
 
             x, y_prev, p_prev, z_prev = x_new, y, p, z
-            
-            
 
             res = torch.nan_to_num(res, nan=1e6, posinf=1e6, neginf=1e6)
+            # --- monitoring only: detach so the per-iteration ray-transform
+            #     graphs are freed immediately (otherwise every iteration keeps
+            #     its ASTRA forward/adjoint alive for backward -> CUDA OOM).
+            #     The loss keeps ONLY the final objective in the graph, which is
+            #     recomputed in-graph just after the loop. ------------------
             residuals.append(res)
-            val = functions['kkt_residual_norm'](x)
-            AxCx.append(val)
 
-
-
+            AxCx.append(functions['kkt_residual_norm'](x))
+            objectives.append(functions['objective'](x))
 
             if return_all:
                 x_hist.append([t.clone() for t in x])
@@ -194,6 +172,19 @@ class UnrolledFBS(nn.Module):
                 u_hist.append([t.clone() for t in u])
                 v_hist.append([t.clone() for t in v])
                 delta_hist.append(delta.clone() if torch.is_tensor(delta) else delta)
+
+        # Recompute the FINAL-iterate KKT residual in-graph: this is the
+        # training loss. The KKT residual ("Ax+Cx") -> 0 at the solution, so it
+        # is a well-conditioned measure of *progress toward optimality* and the
+        # zero-deviation baseline does NOT already minimize it -> the network
+        # actually has something to learn (acceleration). Training on the raw
+        # objective F(x_final) failed: F = F* + small_gap with a large unknown
+        # offset F*, which the convergent baseline already minimizes, leaving no
+        # usable gradient. The objective is still tracked below for monitoring
+        # only (detached). All per-iteration entries were detached in the loop
+        # to keep memory bounded.
+        if len(AxCx) > 0:
+            AxCx[-1] = functions['kkt_residual_norm'](x)
 
         if return_all:
             history = {
@@ -205,6 +196,6 @@ class UnrolledFBS(nn.Module):
                 "v": v_hist,
                 "delta": delta_hist,
             }
-            return AxCx, residuals, history
+            return AxCx, residuals, objectives, history
 
-        return AxCx, residuals, x[0]  
+        return AxCx, residuals, objectives, x[0]

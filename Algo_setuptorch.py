@@ -66,8 +66,8 @@ def get_setup(size, n_angles=180, seed=0, noise_level=0.0, device=None):
     if device is None:
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-   
-    U = odl.uniform_discr([-64, -64], [64, 64], [size, size], dtype='float32')
+    a=size/2
+    U = odl.uniform_discr([-a, -a], [a, a], [size, size], dtype='float32')
     angle_partition = odl.uniform_partition(0, 2 * np.pi, 1000)
     detector_partition = odl.uniform_partition(-360, 360, 1000)
     A = _make_ray_transform(U, angle_partition,detector_partition)
@@ -181,9 +181,9 @@ class Params:
     def __init__(self,
                  lam0=0.9,
                  beta_bar=1.0,
-                 gamma0=1,
-                 alpha1=0.1,
-                 alpha2=0.1,
+                 gamma0=1.8,
+                 alpha1=0.4,
+                 alpha2=0.4,
                  zeta=0.9,
                  size=128,
                  ):
@@ -236,6 +236,62 @@ class Params:
 
 
 # ============================================================
+# TGV² OBJECTIVE  (replaces tgv2_objective.TGV2)
+# ============================================================
+
+def make_objective(setup, params, alpha1=None, alpha2=None):
+    """TGV² objective as a torch-evaluable callable, built from `setup`.
+
+    Replaces ``tgv2_objective.TGV2(setup, params)``: it evaluates the *exact
+    same* functional
+
+        F(u, w) = ½‖A u − y‖² + α₁‖∇u − w‖₁ + α₂‖E w‖₁
+
+    using the normalised ``A``, sinogram ``y`` and the ``∇``, ``E`` operators
+    already wrapped as torch modules inside ``get_setup`` — so its value matches
+    PDHG and the learned scheme bit-for-bit.
+
+    The returned ``objective(u, w)`` keeps the result in the autograd graph (no
+    ``.item()``), so it can be used both as a training loss and to score
+    iterates. ``u : [1,1,H,W]``, ``w : [1,2,H,W]``.
+
+    Attached helpers:
+        objective.parts(u, w) -> (data, reg1, reg2)
+        objective.alpha1, objective.alpha2
+    """
+    A    = setup["A"]        # normalised ray transform (torch)
+    grad = setup["grad"]     # forward gradient (torch)
+    E    = setup["E"]        # symmetrised gradient (torch)
+    y    = setup["data"]     # normalised sinogram (torch)
+    a1 = params.alpha1 if alpha1 is None else alpha1
+    a2 = params.alpha2 if alpha2 is None else alpha2
+
+    def parts(u, w):
+        data = 0.5 * (A(u) - y).pow(2).sum()
+        reg1 = a1 * (grad(u) - w).abs().sum()        # ‖∇u − w‖₁  (anisotropic)
+        reg2 = a2 * E(w).abs().sum()                 # ‖E w‖₁     (anisotropic)
+        return data, reg1, reg2
+
+    def objective(u, w):
+        data, reg1, reg2 = parts(u, w)
+        return data + reg1 + reg2
+
+    objective.parts = parts
+    objective.alpha1 = a1
+    objective.alpha2 = a2
+    return objective
+
+
+def objective_history(objective, x_hist):
+    """Evaluate ``objective`` along a list of iterates ``x=[u,w,p,q]``.
+
+    Returns a numpy array of ``F(u_n, w_n)`` (floats). Mirrors the old
+    ``tgv2_objective.objective_history`` so notebooks keep working unchanged.
+    """
+    return np.asarray([float(objective(x[0], x[1])) for x in x_hist])
+
+
+# ============================================================
 # BUILD ALGORITHM FUNCTIONS
 # ============================================================
 
@@ -255,7 +311,7 @@ def build_algo_functions(setup, params, gamma_safety=0.85, step_safety=0.95,
 
     params.beta_bar = max(params.beta_bar, setup['norm_A'] ** 2) 
     coc_max         = 2.0 / (params.lam0 * params.beta_bar)        
-    params.gamma0   = gamma_safety * coc_max
+    #params.gamma0   = gamma_safety * coc_max
 
     def proj_linf_ball(z, alpha):
         return torch.clamp(z, -alpha, alpha)
@@ -296,6 +352,7 @@ def build_algo_functions(setup, params, gamma_safety=0.85, step_safety=0.95,
         return [u, w, p, q]
 
 
+
     def C(x):
         u = x[0]
         data_grad = AT(A(u) - y)
@@ -321,6 +378,19 @@ def build_algo_functions(setup, params, gamma_safety=0.85, step_safety=0.95,
             r1.pow(2).sum() + r2.pow(2).sum()
             + r3.pow(2).sum() + r4.pow(2).sum()
         )
+
+    # ---- TGV² objective (differentiable, used as training loss) ------------
+    # Built once by make_objective from the SAME normalised A, sinogram y and
+    # TGV operators. _obj(u, w) is the (u, w) callable that reference_fstar.py,
+    # run_pdhg and the notebook use directly; the functions['objective'] below
+    # simply adapts it to the full iterate x = [u, w, p, q].
+    _obj = make_objective(setup, params)
+
+    def objective(x):
+        return _obj(x[0], x[1])
+
+    def objective_parts(x):
+        return _obj.parts(x[0], x[1])
 
 
     def compute_delta_torch(p, x, p_prev, z, z_prev, y_, y_prev, u, v, n):
@@ -366,4 +436,6 @@ def build_algo_functions(setup, params, gamma_safety=0.85, step_safety=0.95,
         compute_delta_torch=compute_delta_torch,
         kkt_residual=kkt_residual,
         kkt_residual_norm=kkt_residual_norm,
+        objective=objective,
+        objective_parts=objective_parts,
     )

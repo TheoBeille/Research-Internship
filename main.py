@@ -37,14 +37,14 @@ SHAPES = [
 N_CH_primal = sum(s[1] for s in SHAPES[:2])    # = 3
 
 TRAIN_SEEDS = list(range(40))
-TEST_SEEDS = list(range(1000, 1008))
+TEST_SEEDS = list(range(1000, 1007))
 
 
-T = 5
-N_EPOCHS = 70
+T = 10
+N_EPOCHS = 50
 LR = 1e-3
 
-GAMMAS = [0.1, 1.0, 1.8, 2.0]
+GAMMAS = [1.8,2]
 
 
 def gamma_tag(g):
@@ -107,7 +107,7 @@ for g in GAMMAS:
         print_every=5,
     )
 
-    ckpt_path = f"checkpoint_tomo_128_gamma_{tag}.pt"
+    ckpt_path = f"objectif_nosafe_tomo_128_gamma_{tag}.pt"
     torch.save(
         {
             "model": model.state_dict(),
