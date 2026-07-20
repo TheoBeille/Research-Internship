@@ -14,14 +14,14 @@ Then load it anywhere without recomputing:
 import os
 import torch
 
-REF_PATH = os.path.join("references", "u_ref_0_2.pt")
+REF_PATH = os.path.join("references", "u_ref_0_02.pt")
 
 # Problem configuration
 SIZE      = 128
 N_ANGLES  = 180
-NOISE     = 0.2
+NOISE     = 0.02
 SEED      = 1000
-REF_ITERS = 5000    
+REF_ITERS = 1000    
 
 def load_reference(file="u_ref.pt", device=None):
     """Load the saved reference image u* as a torch tensor [1,1,H,W]."""
@@ -50,9 +50,10 @@ def l2_distance_history(x_hist, u_ref, relative=True):
 
 
 if __name__ == "__main__":
-    from NN_tomo.Algo_setuptorch import Params, get_setup
-    from NN_tomo.pdhg_tomography_tgv import run_pdhg
-    from NN_tomo.PSNR import psnr_history
+
+    from Algo_setuptorch import Params, get_setup
+    from utils.pdhg_tomography_tgv import run_pdhg
+    from utils.PSNR import psnr_history
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     params = Params(size=SIZE)

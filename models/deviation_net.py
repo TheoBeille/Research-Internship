@@ -34,7 +34,7 @@ class DeviationNet(nn.Module):
         self,
         n_channels,
         hidden=32,
-        n_blocks=8,
+        n_blocks=2,
     ):
         super().__init__()
 

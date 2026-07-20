@@ -8,14 +8,14 @@ from Algo_setuptorch import Params
 from data.dataset import build_train_test_data
 from algorithm.unrolled_model import UnrolledFBS
 from training.train import train
-from plots import (
+from utils.plots import (
     apply_paper_style,
     plot_convergence_2,
     plot_convergence_multi_gamma,
     train_plot,
 )
-from run import run_zero, run_learned
-from PSNR import psnr_history
+from algorithm.run import run_zero, run_learned
+from utils.PSNR import psnr_history
 
 
 apply_paper_style()
@@ -41,10 +41,10 @@ TEST_SEEDS = list(range(1000, 1007))
 
 
 T = 10
-N_EPOCHS = 50
+N_EPOCHS = 100
 LR = 1e-3
 
-GAMMAS = [1.8,2]
+GAMMAS = [1.8]
 
 
 def gamma_tag(g):
@@ -107,7 +107,7 @@ for g in GAMMAS:
         print_every=5,
     )
 
-    ckpt_path = f"objectif_nosafe_tomo_128_gamma_{tag}.pt"
+    ckpt_path = f"kkt_tomo_128_gamma_{tag}_alpha_04.pt"
     torch.save(
         {
             "model": model.state_dict(),
@@ -143,5 +143,4 @@ params.gamma0 = 0.85 * coc_max
 plot_convergence_multi_gamma(
     curves_zero, curves_learned, title="Convergence_all_gamma")
 
-print("\nDone. Per-gamma + combined figures in ./plots, "
-      "checkpoints checkpoint_tomo_128_gamma_*.pt")
+

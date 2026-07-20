@@ -17,7 +17,7 @@ class UnrolledFBS(nn.Module):
         -> next iteration
     """
 
-    def __init__(self, params, shapes, n_channels, T=5, net_hidden=32, net_blocks=8, alpha=0.99):
+    def __init__(self, params, shapes, n_channels, T=5, net_hidden=32, net_blocks=2, alpha=0.99):
         super().__init__()
 
         self.params = params
@@ -154,11 +154,7 @@ class UnrolledFBS(nn.Module):
             x, y_prev, p_prev, z_prev = x_new, y, p, z
 
             res = torch.nan_to_num(res, nan=1e6, posinf=1e6, neginf=1e6)
-            # --- monitoring only: detach so the per-iteration ray-transform
-            #     graphs are freed immediately (otherwise every iteration keeps
-            #     its ASTRA forward/adjoint alive for backward -> CUDA OOM).
-            #     The loss keeps ONLY the final objective in the graph, which is
-            #     recomputed in-graph just after the loop. ------------------
+
             residuals.append(res)
 
             AxCx.append(functions['kkt_residual_norm'](x))
@@ -173,18 +169,9 @@ class UnrolledFBS(nn.Module):
                 v_hist.append([t.clone() for t in v])
                 delta_hist.append(delta.clone() if torch.is_tensor(delta) else delta)
 
-        # Recompute the FINAL-iterate KKT residual in-graph: this is the
-        # training loss. The KKT residual ("Ax+Cx") -> 0 at the solution, so it
-        # is a well-conditioned measure of *progress toward optimality* and the
-        # zero-deviation baseline does NOT already minimize it -> the network
-        # actually has something to learn (acceleration). Training on the raw
-        # objective F(x_final) failed: F = F* + small_gap with a large unknown
-        # offset F*, which the convergent baseline already minimizes, leaving no
-        # usable gradient. The objective is still tracked below for monitoring
-        # only (detached). All per-iteration entries were detached in the loop
-        # to keep memory bounded.
-        if len(AxCx) > 0:
-            AxCx[-1] = functions['kkt_residual_norm'](x)
+
+   
+
 
         if return_all:
             history = {

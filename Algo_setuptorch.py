@@ -182,8 +182,8 @@ class Params:
                  lam0=0.9,
                  beta_bar=1.0,
                  gamma0=1.8,
-                 alpha1=0.4,
-                 alpha2=0.4,
+                 alpha1=0.004,
+                 alpha2=0.04,
                  zeta=0.9,
                  size=128,
                  ):
@@ -379,11 +379,7 @@ def build_algo_functions(setup, params, gamma_safety=0.85, step_safety=0.95,
             + r3.pow(2).sum() + r4.pow(2).sum()
         )
 
-    # ---- TGV² objective (differentiable, used as training loss) ------------
-    # Built once by make_objective from the SAME normalised A, sinogram y and
-    # TGV operators. _obj(u, w) is the (u, w) callable that reference_fstar.py,
-    # run_pdhg and the notebook use directly; the functions['objective'] below
-    # simply adapts it to the full iterate x = [u, w, p, q].
+
     _obj = make_objective(setup, params)
 
     def objective(x):
