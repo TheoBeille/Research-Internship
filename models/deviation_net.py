@@ -7,26 +7,6 @@ def activation(x):
     return F.leaky_relu(x, negative_slope=0.01)
 
 
-# ============================================================
-# Simple feed-forward conv net  (paper 1 style)
-# ============================================================
-#
-# Direct PyTorch port of the reference paper's TensorFlow `convnet`:
-#
-#     x = inst_norm(input)
-#     for _ in range(n_layers):
-#         x = conv(x, filters=32, k=3, SAME)
-#         x = inst_norm(x)
-#         x = leaky_relu(x)
-#     out = conv(x, filters=out_ch, k=3, SAME)
-#
-# No residual blocks and no 1x1 channel-mixing embedding (the previous
-# DeviationNet had 8 residual blocks at 64 channels). Fewer/lighter layers
-# means far fewer activations to keep for backprop -> much lower training
-# memory, which is what lets us push the image size up to 512x512.
-#
-# The forward interface (inputs/outputs) is kept identical to the old network
-# so `UnrolledFBS` does not need any change.
 
 class DeviationNet(nn.Module):
 
