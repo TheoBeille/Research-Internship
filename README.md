@@ -1,149 +1,194 @@
-# Learning to Accelerate TGV² Tomographic Reconstruction
+# Neural Network Acceleration of a Forward–Backward Splitting Scheme for TGV² Tomographic Reconstruction
 
-**A convolutional network learns the deviations of a forward–backward splitting scheme, reaching in 10 iterations an accuracy that the standard solver needs hundreds of iterations to match — without ever losing the convergence guarantee.**
+Code accompanying the research project carried out at the Department of Mathematics,
+KTH Royal Institute of Technology (January–June 2026), supervised by Prof. Ozan Öktem.
 
-<p align="center">
-  <img src="docs/figures/reconstructions_10it.png" width="100%">
-  <br>
-  <em>After 10 iterations. Left to right: ground truth, back-projection init, zero-deviation baseline (25.6 dB), <b>learned (29.9 dB)</b>, PDHG (15.6 dB).</em>
-</p>
+**[Report (PDF)](docs/report.pdf)**
 
-Research internship at **KTH Royal Institute of Technology**, Department of Mathematics
-(Jan–Jun 2026), supervised by Prof. Ozan Öktem. → **[Full report (PDF)](docs/report.pdf)**
+Second-order total generalised variation (TGV²) is a strong regulariser for computed
+tomography, but the resulting optimisation problem is non-smooth and coupled, and
+first-order solvers require a large number of iterations to reach an acceptable accuracy.
+This work recasts TGV² reconstruction as a monotone inclusion `0 ∈ Ax + Cx` and solves it
+with the forward–backward splitting scheme with history and deviations of Sadeghi, Banert
+and Giselsson [1], whose convergence holds for any deviation sequence satisfying a Lyapunov
+safeguarding condition. Rather than selecting the deviations by hand, a lightweight
+convolutional network is trained by unrolling to predict, at each iteration, the deviation
+that most accelerates convergence; a hard safeguard rescales its output so that the
+theoretical guarantee is preserved regardless of what the network produces. The question
+addressed is what accuracy is attainable within the order of ten iterations — the regime in
+which TGV² would become usable in practice.
 
 ---
 
 ## Results
 
-Parallel-beam CT, 128×128, synthetic TGV phantoms, noise level drawn in [0, 0.1].
-All methods minimise the **same** TGV² objective.
+Parallel-beam CT on 128×128 synthetic TGV phantoms, relative noise level drawn in [0, 0.1],
+evaluated on held-out seeds. All methods minimise the same TGV² objective.
 
-| After 10 iterations | PSNR ↑ | Objective gap `f(xₙ) − f*` ↓ |
+| After 10 iterations | PSNR | Objective gap `f(xₙ) − f*` |
 | --- | --- | --- |
-| **Learned deviations** | **29.9 dB** | **~10⁻¹** |
+| Learned deviations | 29.9 dB | ~10⁻¹ |
 | Zero deviations (plain FBS) | 25.6 dB | ~10⁰ |
 | PDHG (Chambolle–Pock) | 15.6 dB | ~10² |
 
-Three things make the claim hold up:
-
-- **The gain comes from learning, not from perturbation.** A random-direction control, given the exact same deviation budget, is *slower* than the baseline.
-- **Convergence is never traded away.** A hard safeguard rescales the network output so the Lyapunov condition of the underlying theorem always holds. Run 100× past the training horizon, the learned iteration still converges; the same iteration with the safeguard removed diverges.
-- **It transfers.** The network is fully convolutional: trained only on 128×128, it accelerates 512×512 problems with no retraining.
+<p align="center">
+  <img src="docs/figures/reconstructions_10it.png" width="100%"><br>
+  <sub><b>Figure 1.</b> Reconstructions after 10 iterations. From left to right: ground truth,
+  the back-projection initialisation Kᵀy, the zero-deviation iterate, the learned iterate,
+  and PDHG.</sub>
+</p>
 
 <p align="center">
   <img src="docs/figures/psnr_vs_iterations.png" width="49%">
-  <img src="docs/figures/kkt_residual.png" width="49%">
-  <br>
-  <em>Left: reconstruction PSNR on held-out test seeds. Right: KKT residual, log–log, against the O(1/t) and O(1/t²) references.</em>
+  <img src="docs/figures/kkt_residual.png" width="49%"><br>
+  <sub><b>Figure 2.</b> Left: reconstruction PSNR on the test set over the first ten
+  iterations. Right: KKT residual ‖(A+C)(xₙ)‖ over 10³ iterations, log–log, against the
+  O(1/t) and O(1/t²) references.</sub>
 </p>
 
----
+Three control experiments support the interpretation of these numbers.
 
-## Why this problem
+*Random directions.* Replacing the network output by random directions of the same
+safeguarded magnitude yields a slower iteration than the zero-deviation baseline, which
+attributes the acceleration to the learned direction rather than to perturbation.
 
-Second-order Total Generalised Variation (TGV²) is a better image model than Total Variation: it preserves edges without turning smooth gradients into flat plateaus (the *staircasing* artefact), which matters for soft tissue in medical images. The reason it is not used in practice is cost — the resulting problem is non-smooth and coupled, first-order solvers converge at O(1/t), and a CT slice may need hundreds of iterations. **The question here is how much accuracy is reachable in the ~10 iterations a real acquisition pipeline can afford.**
+*Safeguarding.* The learned iteration is trained on a horizon of 10–20 steps and remains
+convergent over 10³ iterations. Removing the safeguard, the same iteration diverges past the
+training horizon.
 
----
-
-## How it works
-
-**1. Recast as a monotone inclusion.** Dualising the two ℓ¹ terms turns the TGV² problem into
-
-```
-0 ∈ A x + C x,     x = (u, w, p, q)
-```
-
-with `C(x) = (Kᵀ(K u − y), 0, 0, 0)` the cocoercive data gradient (proved `1/‖K‖²`-cocoercive) and `A` the sum of a skew-symmetric coupling and the normal cones of the dual constraints (proved maximally monotone). This is exactly the structure required by the forward–backward scheme with history and deviations of Sadeghi, Banert & Giselsson.
-
-**2. The deviations are free.** That scheme injects a pair `(Δ¹ₙ, Δ²ₙ)` at each step. Its theorem guarantees convergence for *any* sequence of deviations satisfying a safeguarding inequality. So the deviations are a steering direction that can be chosen as aggressively as one likes — the perfect thing to learn.
-
-**3. Learn them by unrolling.** T iterations are treated as the layers of a weight-tied network. A 17k-parameter CNN (21 input channels: the iterates, the previous deviations, the data-fidelity gradient → two Conv–InstanceNorm–LeakyReLU blocks → 6 output channels) predicts the raw deviation; a normalisation-and-safeguard layer rescales it to the largest provably admissible magnitude. **The network picks the direction, the safeguard picks the size.** Training back-propagates a loss on the final iterate through all T steps, with the horizon randomised so the rule does not overfit one depth.
-
-**4. The resolvent.** `(I + γA)⁻¹` has no closed form for TGV². Solving it by naive fixed-point iteration requires `γ‖B‖ < 1`, which collapses the outer step size and kills tomography. Reformulating the resolvent's own saddle problem and solving it with FISTA removes that condition entirely (`L = 1 + (γ‖B‖)²` already absorbs the factor), which is what allows the outer `γ ≈ 1.8`.
+*Cross-resolution transfer.* The deviation network is fully convolutional and carries no
+dependence on the image size. A network trained exclusively on 128×128 problems accelerates
+512×512 problems without retraining (Section 6.6 of the report).
 
 ---
 
-## Quickstart
+## Method
+
+**Monotone inclusion.** Dualising the two ℓ¹ terms of the TGV² functional and collecting the
+variables into `x = (u, w, p, q)` yields the optimality system in the form `0 ∈ Ax + Cx`,
+where `C(x) = (Kᵀ(Ku − y), 0, 0, 0)` is the data gradient and `A = A_skew + A_prox` is the sum
+of a skew-symmetric coupling and the normal cones of the dual constraint sets. `C` is shown
+to be `1/‖K‖²`-cocoercive and `A` maximally monotone, which is the structure required by [1].
+
+**Learned deviations.** The scheme of [1] injects a pair of deviations `(Δ¹ₙ, Δ²ₙ)` at each
+iteration and guarantees convergence provided they satisfy a safeguarding inequality whose
+budget is generated by the previous step. A CNN of approximately 1.7×10⁴ parameters maps the
+current algorithm state — the iterates, the previous deviations and the data-fidelity
+gradient, 21 channels in total — through two Conv3×3–InstanceNorm–LeakyReLU blocks to six
+output channels, giving the deviations on the primal blocks. A normalisation-and-safeguard
+layer then rescales the raw output to the largest admissible magnitude. The network chooses
+the direction; the safeguard determines the amplitude.
+
+**Training.** A finite horizon of iterations is unrolled and treated as a weight-tied network
+optimised end to end, following [2]. The loss is evaluated at the final iterate and the
+horizon is randomised across training passes. Two training targets are compared in the
+report: the monotone-inclusion (KKT) residual and the TGV² objective value. Both yield
+accelerated, safeguarded schemes.
+
+**Resolvent.** `(I + γA)⁻¹` admits no closed form for TGV². A fixed-point iteration on the
+dual requires `γ‖B‖ < 1`, which forces an outer step size too small to be useful for
+tomography. Solving the resolvent's own saddle problem with FISTA removes this restriction,
+since the Lipschitz constant `L = 1 + (γ‖B‖)²` already absorbs the factor, and permits an
+outer step size of order one.
+
+---
+
+## Installation
 
 ```bash
 pip install -r requirements.txt
-# ASTRA is not reliably installable from PyPI:
-conda install -c astra-toolbox astra-toolbox
+conda install -c astra-toolbox astra-toolbox   # not reliably available on PyPI
 ```
 
-The ray-transform backend falls back `astra_cuda → astra_cpu → skimage`, so it runs on CPU (slower) without a GPU.
+Core dependencies: `numpy`, `torch`, `matplotlib`, `odl`, `scikit-image`. The ray transform
+backend is selected automatically with the fallback `astra_cuda → astra_cpu → skimage`, so
+the code runs on CPU without a GPU.
+
+## Reproducing the experiments
 
 ```bash
-# 1. Precompute the high-accuracy reference u* (PDHG, 5000 iterations). Once.
-python reference.py
-
-# 2. Full pipeline: build data → acceptance test → train → figures
-python main.py
+python reference.py   # high-accuracy reference u* via PDHG (5000 iterations); run once
+python main.py        # data → acceptance test → training → figures
 ```
 
-> ⚠️ `SEED` and `NOISE` in `reference.py` must match those in `main.py`, otherwise `y` differs and every distance-to-reference number is meaningless. Defaults: `SEED = 1000`, `NOISE = 0.2`.
+`reference.py` must use the same `SEED` and `NOISE` as `main.py`; otherwise the data `y`
+differs and the distance-to-reference curves are not meaningful. Defaults are `SEED = 1000`,
+`NOISE = 0.2`, `REF_ITERS = 5000`.
 
-`main.py` runs, in order: build train/test instances → **`run_zero` (T=100), the acceptance test** → train `UnrolledFBS` (T=10, 70 epochs, AdamW + cosine) → save checkpoint → convergence figures.
+`main.py` executes, in order: construction of the train and test instances; `run_zero` with
+T = 100, the acceptance test, which must converge on its own; training of `UnrolledFBS`
+(T = 10, 70 epochs, AdamW with a cosine schedule); checkpointing; and the comparison figures.
 
-The two notebooks reproduce the two training targets studied in the report:
-`running_kkt.ipynb` (loss on the monotone-inclusion residual) and `running_TGVobjectif.ipynb` (loss on the TGV² objective). Both work; the report compares them.
+The two notebooks correspond to the two training targets studied in the report:
+`running_kkt.ipynb` for the inclusion residual and `running_TGVobjectif.ipynb` for the
+objective value.
 
-**Denoising instead of tomography** is a one-line switch in `Algo_setuptorch.py::get_setup` — replace the ray transform by `odl.IdentityOperator(U)`. Everything else is written in terms of `K` and adapts, including the `‖K‖ = 1` normalisation.
-
----
+Switching from tomography to denoising is a single line in `Algo_setuptorch.py::get_setup`,
+where the ray transform is replaced by `odl.IdentityOperator(U)`. The remaining code is
+written in terms of the abstract operator `K` and adapts, including the `‖K‖ = 1`
+normalisation.
 
 ## Repository layout
 
 ```
-Algo_setuptorch.py          # CORE. Problem setup in ODL, wrapped in torch:
-                            #   ray transform (normalised to ‖K‖=1), TGV operators,
-                            #   phantom + data + init, Params (γ, λ, α, ζ),
-                            #   build_algo_functions: FISTA resolvent, C,
-                            #   KKT residual, deviation budget δ
-reference.py                # High-accuracy reference u* via PDHG
-main.py                     # End-to-end: setup → run_zero → train → figures
+Algo_setuptorch.py          Problem setup in ODL wrapped in torch: ray transform
+                            (normalised to ‖K‖=1), TGV operators, phantom, data and
+                            initialisation, Params (γ, λ, α, ζ), and build_algo_functions,
+                            which returns the FISTA resolvent, C, the KKT residual and the
+                            deviation budget
+reference.py                High-accuracy reference minimiser u* via PDHG
+main.py                     End-to-end pipeline
 
-algorithm/
-  fbs_step.py               # one_step: a single FBS iteration with deviations
-  unrolled_model.py         # UnrolledFBS: unrolls T steps, calls net, safeguards
-  normalization.py          # block-norm helpers used by the safeguard
-  run.py                    # run_zero (acceptance test), run_learned, run_random
-models/deviation_net.py     # DeviationNet: the 17k-parameter CNN
-training/                   # train.py (AdamW + cosine), loss.py
-data/                       # dataset.py: seeds → tomographic instances
-utils/                      # PSNR, plotting, independent PDHG solver
-references/                 # saved u* tensors
-trained_models/             # checkpoints
-plots/                      # output figures (PDF)
-
-running_kkt.ipynb           # training target: inclusion residual
-running_TGVobjectif.ipynb   # training target: TGV² objective
+algorithm/fbs_step.py       one_step: a single FBS iteration with deviations
+algorithm/unrolled_model.py UnrolledFBS: unrolls T steps, queries the network, safeguards
+algorithm/normalization.py  Block-norm helpers used by the safeguard
+algorithm/run.py            run_zero (acceptance test), run_learned, run_random
+models/deviation_net.py     DeviationNet
+training/                   train.py, loss.py
+data/dataset.py             Seeds to tomographic instances
+utils/                      PSNR, plotting, independent PDHG solver
+references/                 Saved reference tensors
+trained_models/             Checkpoints
+plots/                      Output figures
 ```
 
-**Correctness check.** `utils/` contains an independent PDHG solver for the *same* objective. With deviations switched off, the scheme must converge to the same image as PDHG — it does (36.8 dB vs 36.6 dB, visually indistinguishable). That agreement is the cleanest evidence the inclusion is set up correctly.
-
----
+An independent PDHG implementation solves the same objective and provides both the reference
+minimiser and a correctness check: with the deviations switched off, the scheme converges to
+the same image as PDHG (36.8 dB against 36.6 dB), which validates the inclusion formulation.
 
 ## Scope and limitations
 
-Stated plainly, because they matter for reading the numbers:
-
-- Training and evaluation use **synthetic TGV phantoms** with artificial noise, not clinical scans. Validating on a real dose-realistic dataset (e.g. Mayo) is the obvious next step.
-- The gain is concentrated in the **early regime**. Asymptotically the learned scheme settles onto the baseline rate — by design, since the safeguard ties it to the baseline's guarantees.
-- The budget fraction `ζₙ` and the parameter sequences `(γₙ, λₙ)` are fixed by hand. Letting the network allocate the budget across iterations is unexplored.
-- Each outer iteration solves the resolvent with ~100 inner FISTA steps, which dominates wall-clock cost. Learning a cheap approximate resolvent would cut the forward/back-projection count — the quantity that actually matters in CT.
-
----
+The phantoms are synthetic and the noise artificial; validation on clinical data with
+realistic dose regimes has not been carried out. The acceleration is concentrated in the
+early iterations and does not alter the asymptotic rate, which is expected, since the
+safeguard ties the learned scheme to the guarantees of the baseline. The budget fraction
+`ζₙ` and the parameter sequences `(γₙ, λₙ)` are fixed rather than learned. Finally, each
+outer iteration solves the resolvent with an inner FISTA loop of up to 100 iterations, which
+dominates the cost in forward and back projections.
 
 ## References
 
-1. H. Sadeghi, S. Banert, P. Giselsson. *Incorporating history and deviations in forward–backward splitting.* Numerical Algorithms 96 (2024). — the convergence theorem used here.
-2. S. Banert, J. Rudzusika, O. Öktem, J. Adler. *Accelerated forward-backward optimization using deep learning.* arXiv:2105.05210 (2021). — the learning strategy this work adapts.
-3. K. Bredies, K. Kunisch, T. Pock. *Total generalized variation.* SIAM J. Imaging Sci. 3(3), 2010.
-4. A. Chambolle, T. Pock. *A first-order primal-dual algorithm...* JMIV 40(1), 2011. — the PDHG baseline.
-5. J. Adler, O. Öktem et al. *ODL: Operator Discretization Library.*
+[1] H. Sadeghi, S. Banert, P. Giselsson. Incorporating history and deviations in
+forward–backward splitting. *Numerical Algorithms* 96:1819–1867, 2024.
 
-The monotone-inclusion formulation for TGV² tomography, its implementation, the FISTA resolvent, the deviation network and the experiments were built during this internship; the convergence theorem of [1] is the only component reused as is.
+[2] S. Banert, J. Rudzusika, O. Öktem, J. Adler. Accelerated forward-backward optimization
+using deep learning. arXiv:2105.05210, 2021.
+
+[3] K. Bredies, K. Kunisch, T. Pock. Total generalized variation. *SIAM Journal on Imaging
+Sciences* 3(3):492–526, 2010.
+
+[4] A. Chambolle, T. Pock. A first-order primal-dual algorithm for convex problems with
+applications to imaging. *Journal of Mathematical Imaging and Vision* 40(1):120–145, 2011.
+
+[5] A. Beck, M. Teboulle. A fast iterative shrinkage-thresholding algorithm for linear
+inverse problems. *SIAM Journal on Imaging Sciences* 2(1):183–202, 2009.
+
+[6] J. Adler, O. Öktem et al. ODL: Operator Discretization Library, 2017.
+
+The monotone-inclusion formulation for TGV² tomography, its implementation, the FISTA
+resolvent, the deviation network and the experimental study were developed for this project;
+the convergence theorem of [1] is reused as is, and the network and training strategy follow
+those of [2].
 
 ## License
 
