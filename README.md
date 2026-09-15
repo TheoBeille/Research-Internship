@@ -3,7 +3,7 @@
 Code accompanying the research project carried out at the Department of Mathematics,
 KTH Royal Institute of Technology (January–June 2026), supervised by Prof. Ozan Öktem.
 
-**[Report (PDF)](docs/report.pdf)**
+**[Report (PDF)](report.pdf)**
 
 Second-order total generalised variation (TGV²) is a strong regulariser for computed
 tomography, but the resulting optimisation problem is non-smooth and coupled, and
