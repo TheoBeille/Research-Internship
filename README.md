@@ -32,15 +32,15 @@ evaluated on held-out seeds. All methods minimise the same TGV² objective.
 | PDHG (Chambolle–Pock) | 15.6 dB | ~10² |
 
 <p align="center">
-  <img src="docs/figures/reconstructions_10it.png" width="100%"><br>
+  <img src="plots/reconstructions_10it.png" width="100%"><br>
   <sub><b>Figure 1.</b> Reconstructions after 10 iterations. From left to right: ground truth,
   the back-projection initialisation Kᵀy, the zero-deviation iterate, the learned iterate,
   and PDHG.</sub>
 </p>
 
 <p align="center">
-  <img src="docs/figures/psnr_vs_iterations.png" width="49%">
-  <img src="docs/figures/kkt_residual.png" width="49%"><br>
+  <img src="plots/psnr_vs_iterations.png" width="49%">
+  <img src="plots/kkt_residual.png" width="49%"><br>
   <sub><b>Figure 2.</b> Left: reconstruction PSNR on the test set over the first ten
   iterations. Right: KKT residual ‖(A+C)(xₙ)‖ over 10³ iterations, log–log, against the
   O(1/t) and O(1/t²) references.</sub>
