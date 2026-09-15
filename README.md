@@ -190,6 +190,3 @@ resolvent, the deviation network and the experimental study were developed for t
 the convergence theorem of [1] is reused as is, and the network and training strategy follow
 those of [2].
 
-## License
-
-MIT
