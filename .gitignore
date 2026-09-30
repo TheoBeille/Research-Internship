@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.ipynb_checkpoints/
+
+# Outputs
+plots/
+checkpoint_tomo.pt
+checkpoints/
+*.log
+
+# Cached high-accuracy reference solutions (recomputed on demand)
+references/
+
+# Local datasets and generated caches
+data/mayo_data/
+data/mayo_cache_512/
+*.npy
+
+# Large model weights
+*.pt
+
+# Local editor settings
+.vscode/
+
+# Env
+.venv/
+venv/
+.DS_Store
