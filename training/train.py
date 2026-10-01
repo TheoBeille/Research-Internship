@@ -1,111 +1,59 @@
 import torch
-import os
 from tqdm import tqdm
 
-save_path = "./checkpoints"
-os.makedirs(save_path, exist_ok=True)
 
-def train(
-    model,
-    train_data,
-    val_data=None,
-    n_epochs=200,
-    lr=1e-3,
-    device="cuda",
-    grad_clip=1.0,
-    print_every=10,
-):
+def train(model, train_data, val_data=None, n_epochs=200, lr=1e-3, device="cuda",
+          grad_clip=1.0):
     """
-    Train the unrolled model.
+    Train the unrolled model. The loss is the KKT residual at the last
+    unrolled iteration.
 
-    Args:
-        model: UnrolledFBS
-        train_data: list of (noisy, clean, functions)
-        n_epochs: number of epochs
-        lr: learning rate
-        device: cpu/cuda
+    train_data, val_data : lists of (initial_state, clean, functions)
+
+    Returns (model, train_loss_history, val_loss_history).
+    All metrics are shown in the progress bars.
     """
-
     model = model.to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-5)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-                optimizer, T_max=n_epochs, eta_min=1e-5
-                )
-    train_loss_hist = []
-    val_loss_hist = []
-    
-    print(f"Training on {n_epochs} epochs...")
-    print(f"Parameters: {sum(p.numel() for p in model.parameters()):,}\n")
+        optimizer, T_max=n_epochs, eta_min=1e-5)
 
-    for epoch in range(n_epochs):
+    train_loss_hist, val_loss_hist = [], []
+    epoch_bar = tqdm(range(n_epochs), desc="Training")
+
+    for epoch in epoch_bar:
 
         model.train()
-        epoch_loss = 0.0
-        valid_batches = 0
+        losses = []
+        batch_bar = tqdm(train_data, desc=f"Epoch {epoch + 1}/{n_epochs}", leave=False)
 
-        # tqdm progress bar for the epoch's training batches
-        pbar = tqdm(train_data, desc=f"Epoch {epoch+1}/{n_epochs}", leave=False)
-
-        for initial_state, _, functions in pbar:
-
-            initial_state = initial_state.to(device)
-
+        for _, _, functions in batch_bar:
             optimizer.zero_grad()
-
-            AxCx, residuals, objectives, x_final = model(initial_state, functions)
-
-            loss   =  AxCx[-1]
+            loss = model(functions)[0][-1]
 
             if not torch.isfinite(loss):
-                print(f"\n[Warning] non-finite loss at epoch {epoch}, skipping batch")
+                tqdm.write(f"[Warning] non-finite loss at epoch {epoch}, skipping batch")
                 continue
 
             loss.backward()
-            
             torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
-
-            for p in model.parameters():
-                if p.grad is not None:
-                    p.grad = torch.nan_to_num(p.grad)
-
             optimizer.step()
-      
-            epoch_loss += loss.item()
-            valid_batches += 1
 
-            # Show the current loss in the progress bar
-            pbar.set_postfix(loss=f"{loss.item():.4f}")
+            losses.append(loss.item())
+            batch_bar.set_postfix(loss=f"{losses[-1]:.4f}")
 
-        # average loss
-        if valid_batches > 0:
-            epoch_loss /= valid_batches
-        else:
-            epoch_loss = float("nan")
         scheduler.step()
-        train_loss_hist.append(epoch_loss)
+        train_loss_hist.append(sum(losses) / len(losses) if losses else float("nan"))
+        metrics = {"train": f"{train_loss_hist[-1]:.4f}"}
 
-        if epoch % print_every == 0:
-            print(f"Epoch {epoch:4d} | Train loss = {epoch_loss:.6f}")
-        
         if val_data is not None:
             model.eval()
-            val_loss = 0.0
-            val_batches = 0
             with torch.no_grad():
-                for initial_state, _, functions in val_data:
-                    initial_state = initial_state.to(device)
-                    AxCx, residuals, objectives, x_final = model(initial_state, functions)
+                val = [model(functions)[0][-1].item() for _, _, functions in val_data]
+            val_loss_hist.append(sum(val) / len(val))
+            metrics["val"] = f"{val_loss_hist[-1]:.4f}"
 
-                    loss   = AxCx[-1]
-                    if torch.isfinite(loss):
-                        val_loss += loss.item()
-                        val_batches += 1
-            val_loss = val_loss / val_batches if val_batches > 0 else float("nan")
-            val_loss_hist.append(val_loss)
-            if epoch % print_every == 0:
-                print(f"           | Val loss   = {val_loss:.6f}")
-            model.train()
-        
-    print("\nTraining finished.")
+        metrics["lr"] = f"{scheduler.get_last_lr()[0]:.1e}"
+        epoch_bar.set_postfix(metrics)
 
     return model, train_loss_hist, val_loss_hist

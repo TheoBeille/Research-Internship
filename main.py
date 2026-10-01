@@ -1,152 +1,77 @@
-#%% Run to have everything  --  TOMOGRAPHY  (train ALL gammas, no-time net)
+"""Baseline run -> training -> comparison, on Mayo CT slices at 512x512."""
+
+import os
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 
 import torch
-import numpy as np
-import matplotlib.pyplot as plt
 
 from Algo_setuptorch import Params
-from data.dataset_mayo import build_train_test_data_mayo
-from algorithm.unrolled_model import UnrolledFBS
-from training.train import train
-from utils.plots import (
-    apply_paper_style,
-    plot_convergence_2,
-    plot_convergence_multi_gamma,
-    train_plot,
-)
 from algorithm.run import run_zero, run_learned
+from algorithm.unrolled_model import UnrolledFBS
+from data.mayo_dataset import build_train_test_data_mayo
+from training.train import train
+from utils.plots import apply_paper_style, plot_convergence, train_plot
 from utils.PSNR import psnr_history
 
-
-apply_paper_style()
-
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-print(f"Device: {device}")
-
-# --- problem size / geometry -------------------------------------------------
-params = Params(size=512)
+# --- configuration -----------------------------------------------------------
+SIZE = 512
 N_ANGLES = 180
-
-size = params.size
-SHAPES = [
-    (1, 1, size, size),   # u  (image)
-    (1, 2, size, size),   # w
-    (1, 2, size, size),   # p  (dual of grad u - w)
-    (1, 3, size, size),   # q  (dual of E w)
-]
-N_CH_primal = sum(s[1] for s in SHAPES[:2])    # = 3
+NOISE_LEVEL = 0.05          # relative noise on the sinogram
+GAMMA = 2                   # needs gamma * beta_bar < 4 - 2 * lam0
 
 TRAIN_PATIENTS = ["L004", "L006", "L012", "L019"]
 TEST_PATIENTS = ["L014"]
 MAYO_CACHE_DIR = "./data/mayo_cache_512"
-NOISE_LEVEL = 0.05          # adjust to the desired sinogram noise level
-MAX_TRAIN_SLICES = 200    # limit for a quick first run; set to None to use all slices
-MAX_TEST_SLICES = 10
+MAX_TRAIN_SLICES = 1        # set to None to use all slices
+MAX_TEST_SLICES = 1
 
-
-T = 10
+T = 10                      # unrolled iterations
 N_EPOCHS = 50
 LR = 1e-3
+CKPT_PATH = f"kkt_tomo_{SIZE}_gamma_{GAMMA}_alpha_04.pt"
 
-GAMMAS = [2]
+SHAPES = [
+    (1, 1, SIZE, SIZE),     # u  (image)
+    (1, 2, SIZE, SIZE),     # w
+    (1, 2, SIZE, SIZE),     # p  (dual of grad u - w)
+    (1, 3, SIZE, SIZE),     # q  (dual of E w)
+]
 
+# --- setup -------------------------------------------------------------------
+apply_paper_style()
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+if device.type == "cuda":
+    torch.cuda.set_per_process_memory_fraction(0.9)     # the GPU is shared
 
-def gamma_tag(g):
-    """Filename tag matching the existing checkpoints (0.1 -> 01, 1.0 -> 1)."""
-    if abs(g - round(g)) < 1e-9:
-        return str(int(round(g)))
-    s = ("%g" % g)
-    return s.replace("0.", "0") if s.startswith("0.") else s
-
+params = Params(size=SIZE, gamma0=GAMMA)
+assert GAMMA * params.beta_bar < 4 - 2 * params.lam0
 
 train_data, test_data = build_train_test_data_mayo(
-    train_patients=TRAIN_PATIENTS,
-    test_patients=TEST_PATIENTS,
-    params=params,
-    device=device,
-    n_angles=N_ANGLES,
-    cache_dir=MAYO_CACHE_DIR,
-    noise_level=NOISE_LEVEL,
-    max_train_slices=MAX_TRAIN_SLICES,
-    max_test_slices=MAX_TEST_SLICES,
+    TRAIN_PATIENTS, TEST_PATIENTS, params, device,
+    n_angles=N_ANGLES, cache_dir=MAYO_CACHE_DIR, noise_level=NOISE_LEVEL,
+    max_train_slices=MAX_TRAIN_SLICES, max_test_slices=MAX_TEST_SLICES,
 )
-
 initial_state, clean, functions = test_data[0]
-coc_max = 2.0 / (params.lam0 * params.beta_bar)
-print(f"beta_bar = {params.beta_bar:.3f}   "
-      f"2/(lam0*beta_bar) = {coc_max:.4f}  (gamma must be < this)")
 
+# --- baseline: zero deviations -----------------------------------------------
+kkt_zero, _, x_hist = run_zero(initial_state, functions, params, SHAPES, T=100, device=device)
+psnr_zero = psnr_history([x_hist[-1]], clean)[0]
+del x_hist
+print(f"Zero deviation: KKT {kkt_zero[0]:.3e} -> {kkt_zero[-1]:.3e}, PSNR = {psnr_zero:.2f} dB")
 
-#%% Baseline (zero-deviation) per gamma + train one model per gamma -----------
-curves_zero = {}
-curves_learned = {}
+# --- training ----------------------------------------------------------------
+model = UnrolledFBS(params, SHAPES, n_channels=3, T=T, alpha=0.99)
+model, train_hist, val_hist = train(
+    model, train_data, val_data=test_data, n_epochs=N_EPOCHS, lr=LR, device=device)
 
-for g in GAMMAS:
-    tag = gamma_tag(g)
-    print("\n" + "=" * 70)
-    print(f"GAMMA = {g}   (checkpoint tag '{tag}')")
-    print("=" * 70)
+torch.save({"model": model.state_dict(), "train_loss_history": train_hist,
+            "val_loss_history": val_hist, "lr": LR, "epochs": N_EPOCHS,
+            "gamma": GAMMA, "T": T}, CKPT_PATH)
+print(f"Saved {CKPT_PATH}")
 
-    params.gamma0 = g
+# --- learned vs. baseline ----------------------------------------------------
+kkt_learned, _ = run_learned(model, initial_state, clean, functions, T_test=100)
+print(f"Learned:        KKT {kkt_learned[0]:.3e} -> {kkt_learned[-1]:.3e}")
 
-    print("[run_zero] baseline ...")
-    AxCx_zero, _res, x_hist = run_zero(
-        initial_state, functions, params, SHAPES, T=100, device=device)
-    rec0 = x_hist[-1][0]
-    psnr0 = psnr_history([rec0], clean)[0]
-    print(f"  KKT {AxCx_zero[0]:.3e} -> {AxCx_zero[-1]:.3e}   PSNR = {psnr0:.2f} dB")
-    curves_zero[g] = np.asarray(AxCx_zero)
- 
-    model = UnrolledFBS(
-        params=params,
-        shapes=SHAPES,
-        n_channels=N_CH_primal,
-        T=T,
-        alpha=0.99,
-    ).to(device).float()
-
-    model, train_hist, val_hist = train(
-        model=model,
-        train_data=train_data,
-        val_data=test_data,
-        n_epochs=N_EPOCHS,
-        lr=LR,
-        device=device,
-        print_every=1,
-    )
-
-    ckpt_path = f"kkt_tomo_512_gamma_{tag}_alpha_04.pt"
-    torch.save(
-        {
-            "model": model.state_dict(),
-            "train_loss_history": train_hist,
-            "val_loss_history": val_hist,
-            "lr": LR,
-            "epochs": N_EPOCHS,
-            "gamma": g,
-            "T": T,
-        },
-        ckpt_path,
-    )
-    print(f"  saved {ckpt_path}")
-
-
-    print("[run_learned] ...")
-    AxCx_learned, _ = run_learned(
-        model, initial_state, clean, functions, T_test=100)
-    curves_learned[g] = np.asarray(AxCx_learned)
-
-    plot_convergence_2(
-        AxCx_zero, AxCx_learned, label3="learned",
-        title=f"Convergence_tomo_gamma_{tag}")
-    train_plot(
-        train_hist, val_hist,
-        title=f"Training_Validation_tomo_gamma_{tag}")
-
-# restore automatic gamma
-params.gamma0 = 0.85 * coc_max
-
-
-
-plot_convergence_multi_gamma(
-    curves_zero, curves_learned, title="Convergence_all_gamma")
+plot_convergence(kkt_zero, kkt_learned, name=f"convergence_gamma_{GAMMA}")
+train_plot(train_hist, val_hist, name=f"training_gamma_{GAMMA}")
