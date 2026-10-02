@@ -25,9 +25,11 @@ models/deviation_net.py     DeviationNet: the CNN that predicts the deviations
 training/train.py           training loop (AdamW, cosine schedule)
 data/mayo_dataset.py        Mayo CT slices: DICOM -> .npy cache -> instances
 mayo_download.py            download the Mayo dataset
-utils/                      PSNR, figures, PDHG reference problem
-main.py                     baseline -> training -> comparison
-make_paper_figures.ipynb    figures of the paper (run after main.py)
+utils/                      PSNR, figures, PDHG, helpers of the notebooks
+main.py                     training (writes the checkpoint)
+1_baselines.ipynb           figures without any trained model (zero / random)
+2_learned.ipynb             learned vs. zero vs. random, safeguard ablation
+3_pdhg_comparison.ipynb     learned vs. PDHG, time comparison table
 ```
 
 ## Run
@@ -38,20 +40,35 @@ conda install -c astra-toolbox astra-toolbox   # GPU ray transform
 
 python mayo_download.py          # download 5 patients
 python data/mayo_dataset.py      # build the .npy cache
-python main.py                   # baseline, training, figures in plots/
+python main.py                   # training
+# then run the notebooks 1, 2, 3: figures and tables go to plots/
 ```
 
 ## Notes on the method
 
 - **Resolvent.** `(M + γA)⁻¹` is explicit thanks to the preconditioning metric
-  `M = γ [[I/s, −Bᵀ], [−B, I/s]]`, with `B(u,w) = (∇u − w, E w)` and
-  `s = 0.95/‖B‖`. It costs one PDHG-like step, with no inner loop.
-- **γ.** It cancels in the resolvent step and only enters through the θ
-  coefficients, as the product `γ·β̄`. The condition is `γ·β̄ < 4 − 2λ₀`.
+  `M = γ [[I/τ, −Bᵀ], [−B, I/σ]]`, with `B(u,w) = (∇u − w, E w)` and
+  `τσ‖B‖² = 0.95²`. It costs one PDHG-like step (primal step `τ`, dual step
+  `σ`), with no inner loop.
+- **Primal step.** `τ` is the gradient step on the data term (`‖K‖ = 1`). The
+  default is `τ = 1.5` (`Params(primal_step=...)`). The balanced choice
+  `τ = σ ≈ 0.3` is about five times slower. A larger `τ` leaves less room to
+  the deviations: the safeguard budget is proportional to `4 − γβ̄ − 2λ₀`.
+- **γ and β̄.** γ cancels in the resolvent step and only enters through the θ
+  coefficients, as the product `γβ̄`. `β̄` is set to the cocoercivity constant
+  of `C` in the metric `M` (computed by power iteration, 5% margin), which
+  gives `γβ̄ ≈ 1.05 τ`. The condition is `γβ̄ < 4 − 2λ₀`.
+- **Zero deviations.** Without deviations the iterates are those of relaxed
+  PDHG with relaxation `λ₀` (exactly when the forward–backward map is affine,
+  and to three digits in our runs): the schedule `λₙ` only matters once
+  deviations are used.
 - **Safeguard.** Budget and deviation norms are both measured in the M-norm.
-  The network output is normalised and rescaled to use a fraction `α²ζ` of the
-  budget.
+  The network output is normalised and rescaled to use at most a fraction
+  `α²ζ` of the budget; a small output gives a small deviation.
 - **Memory.** Each unrolled iteration is wrapped in `torch.utils.checkpoint`,
   so activations are recomputed during the backward pass instead of stored
   (about 1.6 GB for 20 iterations at 512×512).
-- **Loss.** KKT residual `‖(A + C)(x_T)‖` at the last unrolled iteration.
+- **Loss.** TGV² objective at the last unrolled iterate (`LOSS` in `main.py`;
+  the KKT residual `‖(A + C)(x_T)‖` and the error to the ground truth are
+  also available). The number of unrolled iterations is drawn between `T`
+  and `2T` at every step.

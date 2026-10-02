@@ -37,3 +37,48 @@ def build_pdhg_problem(setup, params):
         params.alpha2 * odl.solvers.L1Norm(E.range))
 
     return op, f, g, domain
+
+
+def run_pdhg(setup, params, objective, clean, T, snapshots=(10,), tau=0.5):
+    """
+    Run T iterations of PDHG from zero and time them.
+
+    objective : function (u, w) -> TGV2 objective (see make_objective)
+    tau       : primal step; the dual step follows from
+                tau * sigma * ||op||^2 = 1 / 1.1^2. None gives the balanced
+                steps tau = sigma.
+    Returns the same dict as utils.experiments.run_fbs (without "kkt").
+    """
+    import time
+    import torch
+    from utils.PSNR import psnr_history
+
+    op, f, g, _ = build_pdhg_problem(setup, params)
+    balanced = 1.0 / (1.1 * odl.power_method_opnorm(op, maxiter=50))
+    if tau is None:
+        tau = balanced
+    sigma = balanced ** 2 / tau
+    device = setup["device"]
+    result = {"objective": [], "psnr": [], "images": {}}
+
+    def record(x):
+        u = torch.tensor(np.asarray(x[0]), device=device)[None, None]
+        w = torch.tensor(np.asarray(x[1]), device=device)[None]
+        result["objective"].append(objective(u, w).item())
+        result["psnr"].append(psnr_history([u], clean)[0])
+        n = len(result["psnr"])
+        if n in snapshots or n == T:
+            result["images"][n] = u
+
+    odl.solvers.pdhg(op.domain.zero(), f, g, op, niter=T, tau=tau, sigma=sigma,
+                     callback=record)
+
+    # timing: a second, short run without the monitoring
+    n_timing = min(T, 20)
+    start = time.perf_counter()
+    odl.solvers.pdhg(op.domain.zero(), f, g, op, niter=n_timing, tau=tau, sigma=sigma)
+    result["ms_per_iter"] = 1000 * (time.perf_counter() - start) / n_timing
+
+    result["objective"] = np.array(result["objective"])
+    result["psnr"] = np.array(result["psnr"])
+    return result

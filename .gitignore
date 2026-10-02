@@ -21,6 +21,9 @@ data/mayo_cache_512/
 # Large model weights
 *.pt
 
+# Paper sources
+Latex_paper/
+
 # Local editor settings
 .vscode/
 
@@ -28,3 +31,4 @@ data/mayo_cache_512/
 .venv/
 venv/
 .DS_Store
+results/

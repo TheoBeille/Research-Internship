@@ -37,8 +37,9 @@ def run_random(initial_state, functions, params, shapes, T=100, device="cuda",
 
 
 def run_learned(model, initial_state, clean, functions, T_test=500, return_all=False,
-                use_safeguard=True):
-    """Learned deviations. With return_all, also returns {"x": x_hist}."""
+                use_safeguard=None):
+    """Learned deviations (safeguarded or not, as the model was trained, unless
+    use_safeguard is given). With return_all, also returns {"x": x_hist}."""
     model.eval()
     with torch.no_grad():
         kkt, residuals, x_hist = _floats(*model(

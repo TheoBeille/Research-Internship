@@ -51,23 +51,36 @@ def safeguard(u_raw, v_raw, delta, n, params, M_norm_sq, alpha):
         (lam + mu) * (theta_tilde/theta_hat ||u||_M^2 + theta_hat/theta ||v||_M^2)
             <= zeta * delta
 
-    The directions are first normalised, then scaled to use a fraction
-    alpha^2 of the allowed budget.
+    The directions are first normalised, then scaled to use at most a
+    fraction alpha^2 of the allowed budget. The network chooses how much of
+    it: a raw direction with root mean square r is shrunk by r / sqrt(r^2 + 1)
+    (close to 1 for a large output, close to 0 for a small one), which can
+    only make the left-hand side smaller.
+
+    The square roots are written so that their gradient stays finite at 0.
     """
     def normalise(blocks):
-        norm = torch.sqrt(sum(b.pow(2).sum() for b in blocks)).clamp(min=1e-6)
-        return [b / norm for b in blocks]
+        """Unit direction and its shrinking factor in [0, 1)."""
+        sq = sum(b.pow(2).sum() for b in blocks)
+        size = sum(b.numel() for b in blocks[:2])     # the dual blocks are zero
+        norm = torch.sqrt(sq + 1e-12)
+        return [b / norm for b in blocks], norm / torch.sqrt(sq + size)
 
-    u_raw, v_raw = normalise(u_raw), normalise(v_raw)
+    def safe_sqrt(x):
+        positive = x > 0
+        return torch.where(positive, torch.sqrt(torch.where(positive, x, torch.ones_like(x))),
+                           torch.zeros_like(x))
+
+    (u_raw, shrink_u), (v_raw, shrink_v) = normalise(u_raw), normalise(v_raw)
 
     lam_mu = params.lam(n + 1) + params.mu(n + 1)
     c_u = lam_mu * params.theta_tilde(n + 1) / params.theta_hat(n + 1)
     c_v = lam_mu * params.theta_hat(n + 1) / params.theta(n + 1)
 
     Q = c_u * M_norm_sq(u_raw) + c_v * M_norm_sq(v_raw)
-    scale = alpha * torch.sqrt(params.zeta * delta / Q.clamp(min=1e-12))
+    scale = alpha * safe_sqrt(params.zeta * delta / Q.clamp(min=1e-12))
 
-    return [scale * b for b in u_raw], [scale * b for b in v_raw]
+    return ([shrink_u * scale * b for b in u_raw], [shrink_v * scale * b for b in v_raw])
 
 
 def fbs_iteration(n, state, functions, params, direction, alpha, use_safeguard):
@@ -98,16 +111,19 @@ def fbs_iteration(n, state, functions, params, direction, alpha, use_safeguard):
 
 
 def unroll(functions, params, shapes, T, device, direction=None, alpha=0.99,
-           use_safeguard=True, keep_history=False, progress=False):
+           use_safeguard=True, keep_history=False, progress=False, monitor=True):
     """
     Run T iterations from x = 0.
 
     Returns
         kkt       : KKT residual at every iteration. When gradients are
                     enabled only kkt[-1] carries a graph (training loss).
+                    Empty if monitor is False (used to time the iterations).
         residuals : fixed-point residual ||p_n - y_n|| at every iteration
         x_hist    : primal iterates [u, w] (every iteration if keep_history,
-                    otherwise only the last one)
+                    otherwise only the last one). When gradients are enabled
+                    the last one carries a graph, for losses other than the
+                    KKT residual.
     """
     state = zero_state(shapes, device)
     with_grad = torch.is_grad_enabled()
@@ -122,10 +138,13 @@ def unroll(functions, params, shapes, T, device, direction=None, alpha=0.99,
             state, residual = fbs_iteration(*args)
 
         x = state[0]
-        with torch.set_grad_enabled(with_grad and n == T - 1):
-            kkt.append(functions["kkt_residual_norm"](x))
+        if monitor:
+            with torch.set_grad_enabled(with_grad and n == T - 1):
+                kkt.append(functions["kkt_residual_norm"](x))
         residuals.append(residual.detach())
-        if keep_history or n == T - 1:
+        if with_grad and n == T - 1:
+            x_hist.append(list(x[:2]))
+        elif keep_history or n == T - 1:
             x_hist.append([b.detach() for b in x[:2]])
 
     return kkt, residuals, x_hist

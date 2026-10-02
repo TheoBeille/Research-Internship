@@ -13,7 +13,7 @@ class UnrolledFBS(nn.Module):
     """
 
     def __init__(self, params, shapes, n_channels, T=10, net_hidden=32, net_blocks=2,
-                 alpha=0.99, random_horizon=True):
+                 alpha=0.99, random_horizon=True, use_safeguard=True):
         super().__init__()
         self.params = params
         self.shapes = shapes
@@ -21,15 +21,20 @@ class UnrolledFBS(nn.Module):
         self.alpha = alpha
         # train on T + randint(0, T) iterations (as in Banert et al.) instead of T
         self.random_horizon = random_horizon
+        # False: the network output is applied directly (no convergence guarantee)
+        self.use_safeguard = use_safeguard
         self.dev_net = DeviationNet(n_channels, hidden=net_hidden, n_blocks=net_blocks)
 
-    def forward(self, functions, T=None, use_safeguard=True, keep_history=False,
+    def forward(self, functions, T=None, use_safeguard=None, keep_history=False,
                 progress=False):
         """Returns (kkt, residuals, x_hist), see algorithm.fbs_step.unroll."""
         if T is None:
             T = self.T
             if self.training and self.random_horizon:
                 T += random.randint(0, self.T)
+
+        if use_safeguard is None:
+            use_safeguard = self.use_safeguard
 
         device = next(self.parameters()).device
         return unroll(functions, self.params, self.shapes, T, device,

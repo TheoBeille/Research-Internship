@@ -73,28 +73,62 @@ def _save(name):
     plt.close()
 
 
-def plot_convergence(kkt_zero, kkt_learned, name="convergence"):
-    """KKT residual of the baseline and of the learned scheme (log-log),
-    with O(1/t) and O(1/t^2) reference slopes. Saved as plots/<name>.pdf."""
-    plt.figure(figsize=(6, 4))
-    t = np.arange(1, len(kkt_zero) + 1)
-    plt.loglog(t, kkt_zero, label="Zero deviation", color=PAPER["blue"])
-    plt.loglog(np.arange(1, len(kkt_learned) + 1), kkt_learned, label="Learned",
-               color=PAPER["orange"], linestyle="--")
-    plt.loglog(t, kkt_zero[0] / t, color=PAPER["gray"], lw=1.1, ls="--", label=r"$O(1/t)$")
-    plt.loglog(t, kkt_zero[0] / t ** 2, color=PAPER["gray"], lw=1.1, ls=":", label=r"$O(1/t^2)$")
-    plt.xlabel("Iteration")
-    plt.ylabel("KKT residual")
-    plt.legend()
-    _save(name)
+# one fixed style per method, so that all figures are consistent
+STYLES = {
+    "Zero deviation":         dict(color=PAPER["blue"], ls="-"),
+    "Learned":                dict(color=PAPER["orange"], ls="--"),
+    "Random":                 dict(color=PAPER["green"], ls=":"),
+    "Learned (no safeguard)": dict(color=PAPER["red"], ls="--"),
+    "PDHG":                   dict(color=PAPER["purple"], ls="-"),
+}
 
 
-def train_plot(train_loss_hist, val_loss_hist, name="training"):
-    """Training and validation loss per epoch. Saved as plots/<name>.pdf."""
-    plt.figure(figsize=(6, 4))
-    plt.semilogy(train_loss_hist, label="Training", color=PAPER["blue"])
-    plt.semilogy(val_loss_hist, label="Validation", color=PAPER["orange"])
-    plt.xlabel("Epoch")
-    plt.ylabel("KKT residual at the last unrolled iteration")
-    plt.legend()
-    _save(name)
+def plot_curves(curves, ylabel, name, loglog=True, slopes=False, horizon=None,
+                hline=None, show=False):
+    """
+    Plot one curve per method against the iteration number.
+
+    curves  : dict {label: values, one per iteration}
+    slopes  : add O(1/n) and O(1/n^2) reference lines
+    horizon : draw a vertical line at the training horizon
+    hline   : (value, label) horizontal reference line
+    Saved as plots/<name>.pdf.
+    """
+    plt.figure(figsize=(6, 6))
+    plot = plt.loglog if loglog else plt.semilogx
+    for label, values in curves.items():
+        plot(np.arange(1, len(values) + 1), values, label=label, **STYLES.get(label, {}))
+
+    if slopes:
+        first = next(iter(curves.values()))
+        n = np.arange(1, len(first) + 1)
+        plot(n, first[0] / n, color=PAPER["gray"], lw=1.0, ls="--", label=r"$O(1/n)$")
+        plot(n, first[0] / n ** 2, color=PAPER["gray"], lw=1.0, ls=":", label=r"$O(1/n^2)$")
+    if horizon is not None:
+        plt.axvline(horizon, color=PAPER["gray"], lw=1.0, ls="-.", label=f"$T={horizon}$ (training)")
+    if hline is not None:
+        plt.axhline(hline[0], color=PAPER["gray"], lw=1.0, ls="--", label=hline[1])
+
+    plt.xlabel("iteration $n$")
+    plt.ylabel(ylabel)
+    plt.legend(fontsize=9)
+    plt.tight_layout()
+    plt.savefig(os.path.join(_ensure_plots_dir(), f"{name}.pdf"))
+    plt.show() if show else plt.close()
+
+
+def show_images(images, name, clim=(0, 1), show=False):
+    """
+    Row of grayscale images. images : dict {title: tensor [1, 1, H, W]}.
+    clim : gray-level range, or None to scale each image separately.
+    Saved as plots/<name>.pdf.
+    """
+    vmin, vmax = clim if clim is not None else (None, None)
+    fig, axes = plt.subplots(1, len(images), figsize=(3.2 * len(images), 3.6))
+    for ax, (title, image) in zip(np.atleast_1d(axes), images.items()):
+        ax.imshow(image.squeeze().cpu().numpy(), cmap="gray", vmin=vmin, vmax=vmax)
+        ax.set_title(title, fontsize=10)
+        ax.axis("off")
+    plt.tight_layout()
+    plt.savefig(os.path.join(_ensure_plots_dir(), f"{name}.pdf"))
+    plt.show() if show else plt.close()

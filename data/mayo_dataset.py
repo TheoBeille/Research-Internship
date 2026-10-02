@@ -121,11 +121,13 @@ def build_train_test_data_mayo(train_patients, test_patients, params, device,
     def build_split(patients, max_slices):
         dataset = MayoSliceDataset(patients, cache_dir)
         n = len(dataset) if max_slices is None else min(max_slices, len(dataset))
+        # evenly spaced slices, so that all patients and body regions are covered
+        indices = np.linspace(0, len(dataset) - 1, n).round().astype(int)
         data = []
-        for i in range(n):
-            setup = get_setup(params.size, n_angles=n_angles, seed=i,
+        for i in indices:
+            setup = get_setup(params.size, n_angles=n_angles, seed=int(i),
                               noise_level=noise_level, device=device,
-                              phantom_array=dataset[i].squeeze(0).numpy())
+                              phantom_array=dataset[int(i)].squeeze(0).numpy())
             functions = build_algo_functions(setup, params)
             data.append((setup["initial_state"], setup["phantom"], functions))
         return data

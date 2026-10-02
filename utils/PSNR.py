@@ -12,5 +12,5 @@ def psnr_history(x_list, clean, max_val=1.0):
     for x in x_list:
         image = x[0] if isinstance(x, list) else x
         mse = ((image - clean) ** 2).mean().item()
-        hist.append(20.0 * np.log10(max_val / np.sqrt(mse)) if mse > 1e-12 else 100.0)
+        hist.append(float(20.0 * np.log10(max_val / np.sqrt(mse))) if mse > 1e-12 else 100.0)
     return hist
