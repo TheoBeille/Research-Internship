@@ -12,7 +12,7 @@ def build_pdhg_problem(setup, params):
     """
     U = setup["space"]
     K = setup["ray_transform"]
-    K_n = (1.0 / odl.power_method_opnorm(K, maxiter=30)) * K     # ||K|| = 1
+    K_n = (1.0 / setup["norm_K"]) * K     # same normalization as torch operators
     y = K.range.element(np.asarray(setup["data"].cpu())[0, 0])
 
     # TGV operators, identical to get_setup
@@ -39,7 +39,7 @@ def build_pdhg_problem(setup, params):
     return op, f, g, domain
 
 
-def run_pdhg(setup, params, objective, clean, T, snapshots=(10,), tau=0.5):
+def run_pdhg(setup, params, objective, clean, T, snapshots=(10,), tau=None):
     """
     Run T iterations of PDHG from zero and time them.
 
@@ -61,12 +61,19 @@ def run_pdhg(setup, params, objective, clean, T, snapshots=(10,), tau=0.5):
     device = setup["device"]
     result = {"objective": [], "psnr": [], "images": {}}
 
+    u0 = torch.zeros((1, 1) + tuple(setup["space"].shape), device=device)
+    w0 = torch.zeros((1, 2) + tuple(setup["space"].shape), device=device)
+    result["objective"].append(objective(u0, w0).item())
+    result["psnr"].append(psnr_history([u0], clean)[0])
+    if 0 in snapshots:
+        result["images"][0] = u0
+
     def record(x):
         u = torch.tensor(np.asarray(x[0]), device=device)[None, None]
         w = torch.tensor(np.asarray(x[1]), device=device)[None]
         result["objective"].append(objective(u, w).item())
         result["psnr"].append(psnr_history([u], clean)[0])
-        n = len(result["psnr"])
+        n = len(result["psnr"]) - 1
         if n in snapshots or n == T:
             result["images"][n] = u
 

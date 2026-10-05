@@ -122,7 +122,7 @@ def unroll(functions, params, shapes, T, device, direction=None, alpha=0.99,
         residuals : fixed-point residual ||p_n - y_n|| at every iteration
         x_hist    : primal iterates [u, w] (every iteration if keep_history,
                     otherwise only the last one). When gradients are enabled
-                    the last one carries a graph, for losses other than the
+                    the kept iterates carry a graph, for losses other than the
                     KKT residual.
     """
     state = zero_state(shapes, device)
@@ -142,9 +142,7 @@ def unroll(functions, params, shapes, T, device, direction=None, alpha=0.99,
             with torch.set_grad_enabled(with_grad and n == T - 1):
                 kkt.append(functions["kkt_residual_norm"](x))
         residuals.append(residual.detach())
-        if with_grad and n == T - 1:
-            x_hist.append(list(x[:2]))
-        elif keep_history or n == T - 1:
-            x_hist.append([b.detach() for b in x[:2]])
+        if keep_history or n == T - 1:
+            x_hist.append(list(x[:2]) if with_grad else [b.detach() for b in x[:2]])
 
     return kkt, residuals, x_hist

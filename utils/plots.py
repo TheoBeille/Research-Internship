@@ -4,6 +4,7 @@ import shutil
 import numpy as np
 import matplotlib
 import matplotlib.pyplot as plt
+from matplotlib.ticker import MaxNLocator
 
 
 PAPER = {
@@ -84,7 +85,7 @@ STYLES = {
 
 
 def plot_curves(curves, ylabel, name, loglog=True, slopes=False, horizon=None,
-                hline=None, show=False):
+                hline=None, show=False, mark_first=True, iteration_start=1):
     """
     Plot one curve per method against the iteration number.
 
@@ -92,22 +93,42 @@ def plot_curves(curves, ylabel, name, loglog=True, slopes=False, horizon=None,
     slopes  : add O(1/n) and O(1/n^2) reference lines
     horizon : draw a vertical line at the training horizon
     hline   : (value, label) horizontal reference line
+    mark_first : highlight the first recorded iterate at n=1
+    iteration_start : iteration number assigned to the first value
     Saved as plots/<name>.pdf.
     """
     plt.figure(figsize=(6, 6))
-    plot = plt.loglog if loglog else plt.semilogx
+    plot = plt.loglog if loglog else plt.plot
+    def visible(values):
+        """(iterations, values), without n = 0 on a log scale."""
+        values = np.asarray(values)
+        iterations = np.arange(iteration_start, iteration_start + len(values))
+        keep = iterations > 0 if loglog else slice(None)
+        return iterations[keep], values[keep]
+
     for label, values in curves.items():
-        plot(np.arange(1, len(values) + 1), values, label=label, **STYLES.get(label, {}))
+        style = STYLES.get(label, {})
+        iterations, values = visible(values)
+        plot(iterations, values, label=label, **style)
+        if mark_first and len(values):
+            plt.scatter([iterations[0]], [values[0]], color=style.get("color"),
+                        s=28, zorder=3)
 
     if slopes:
-        first = next(iter(curves.values()))
-        n = np.arange(1, len(first) + 1)
-        plot(n, first[0] / n, color=PAPER["gray"], lw=1.0, ls="--", label=r"$O(1/n)$")
-        plot(n, first[0] / n ** 2, color=PAPER["gray"], lw=1.0, ls=":", label=r"$O(1/n^2)$")
+        # anchored at the first plotted point of the first curve: c / n^p goes through it
+        n, first = visible(next(iter(curves.values())))
+        n = n[n > 0]
+        c, n0 = first[-len(n)], n[0]
+        plot(n, c * n0 / n, color=PAPER["gray"], lw=1.0, ls="--", label=r"$O(1/n)$")
+        plot(n, c * n0 ** 2 / n ** 2, color=PAPER["gray"], lw=1.0, ls=":", label=r"$O(1/n^2)$")
     if horizon is not None:
         plt.axvline(horizon, color=PAPER["gray"], lw=1.0, ls="-.", label=f"$T={horizon}$ (training)")
     if hline is not None:
         plt.axhline(hline[0], color=PAPER["gray"], lw=1.0, ls="--", label=hline[1])
+
+    if not loglog:
+        plt.xlim(left=0)
+        plt.gca().xaxis.set_major_locator(MaxNLocator(integer=True))
 
     plt.xlabel("iteration $n$")
     plt.ylabel(ylabel)

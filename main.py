@@ -14,25 +14,27 @@ from utils.plots import apply_paper_style, plot_curves
 from utils.PSNR import psnr_history
 
 # --- configuration -----------------------------------------------------------
-SIZE = 128
+SIZE = 512
 N_ANGLES = 180
 NOISE_LEVEL = 0.05          # relative noise on the sinogram
 GAMMA = 2
-PRIMAL_STEP = 1.5           # primal step tau (see Params); must match the notebooks
-USE_SAFEGUARD = False        # False: train the network without the safeguard
+PRIMAL_STEP = 1# primal step tau (see Params); must match the notebooks
+USE_SAFEGUARD = True        # False: train the network without the safeguard
 
 # L014 is kept untouched for the figures (notebooks): it is never used here
 TRAIN_PATIENTS = ["L004", "L006", "L012"]
 VAL_PATIENTS = ["L019"]
-MAYO_CACHE_DIR = "./data/mayo_cache_128"
+MAYO_CACHE_DIR = "./data/mayo_cache_512"
 MAX_TRAIN_SLICES = 200      # evenly spaced over the patients; None = all slices
 MAX_VAL_SLICES = 10
 
 T = 10                      # unrolled iterations
-N_EPOCHS = 15
+N_EPOCHS = 30
 LR = 3e-4
 # training loss at the last unrolled iterate (see training.train.final_loss):
 #   "objective" : TGV2 objective
+#   "objective_traj" : TGV2 objective averaged over the T iterates
+#   "objective_log"  : log of the TGV2 objective averaged over the T iterates
 #   "image"     : squared error to the ground-truth image
 #   "kkt"       : KKT residual
 LOSS = "objective"

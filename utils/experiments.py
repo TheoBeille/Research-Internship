@@ -89,6 +89,8 @@ def run_fbs(inst, T, direction=None, use_safeguard=True, snapshots=(10,), n_timi
 
     with torch.no_grad():
         kkt, _, x_hist = unroll(*args, T, keep_history=True, progress=True, **kwargs)
+        x0 = [torch.zeros_like(b) for b in x_hist[0]]
+        x_hist = [x0] + x_hist
         objective = [inst["functions"]["objective"](x).item() for x in x_hist]
 
         n_timing = min(T, n_timing)
@@ -104,7 +106,7 @@ def run_fbs(inst, T, direction=None, use_safeguard=True, snapshots=(10,), n_timi
         kkt=np.array([k.item() for k in kkt]),
         objective=np.array(objective),
         psnr=np.array(psnr_history(x_hist, inst["clean"])),
-        images={n: x_hist[n - 1][0] for n in set(snapshots) | {T} if n <= T},
+        images={n: x_hist[n][0] for n in set(snapshots) | {T} if n <= T},
         ms_per_iter=ms_per_iter,
     )
 
@@ -146,7 +148,7 @@ def time_table(results, name="time_comparison"):
 
     rows = [{"Method": method,
              "Time / iteration (ms)": f"{r['ms_per_iter']:.0f}",
-             "PSNR after 10 it. (dB)": f"{r['psnr'][9]:.2f}"}
+             "PSNR after 10 it. (dB)": f"{r['psnr'][10]:.2f}"}
             for method, r in results.items()]
     table = pd.DataFrame(rows).set_index("Method")
 

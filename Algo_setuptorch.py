@@ -129,7 +129,7 @@ def get_setup(size, n_angles=180, seed=0, noise_level=0.0, device=None,
         device=device,
         geometry=(size, n_angles, max_angle, n_detector),
         K=K, KT=KT, grad=grad, gradT=gradT, E=sym_grad, ET=sym_gradT,
-        norm_B=norm_B,
+        norm_K=norm_K, norm_B=norm_B,
         data=data,                    # noisy sinogram
         initial_state=KT(data),       # back-projection (for display only)
         phantom=phantom,              # ground truth
@@ -143,8 +143,8 @@ def get_setup(size, n_angles=180, seed=0, noise_level=0.0, device=None,
 
 class Params:
 
-    def __init__(self, lam0=0.9, beta_bar=None, gamma0=2, alpha1=0.0005,
-                 alpha2=0.001, zeta=0.9, size=128, primal_step=1.5, lam_exponent=0.3):
+    def __init__(self, lam0=0.9, beta_bar=None, gamma0=400, alpha1=0.0005,
+                 alpha2=0.001, zeta=0.9, size=128, primal_step=1, lam_exponent=0.3):
         self.lam0 = lam0
         self.lam_exponent = lam_exponent    # e in lam_n = lam0 * (1 + n)^e, 0 <= e <= 1
         # Step tau of the primal update in the preconditioned resolvent (the
@@ -290,7 +290,7 @@ def build_algo_functions(setup, params, step_safety=0.95):
     if params.beta_bar is None:
         # beta_bar = beta (with 5% margin for the error of the power iteration).
         # A larger beta_bar is allowed but shrinks the safeguard budget.
-        params.beta_bar = 1.05 * cocoercivity_constant(setup, params.gamma0, tau, sigma)
+        params.beta_bar = 1 * cocoercivity_constant(setup, params.gamma0, tau, sigma)
     assert params.gamma0 * params.beta_bar < 4 - 2 * params.lam0
 
     def B(u, w):

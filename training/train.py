@@ -9,13 +9,22 @@ def final_loss(model, clean, functions, loss):
 
     "kkt"       : KKT residual ||(A + C)(x_T)||
     "objective" : TGV2 objective F(u_T, w_T), the quantity plotted in the paper
+    "objective_traj" : mean of F(u_n, w_n) over n = 1..T, so that every iterate
+                  of the window is pushed down, not only the last one
+    "objective_log"  : mean of log F(u_n, w_n) over n = 1..T: the same relative
+                  decrease counts the same at every iterate, so the late iterates
+                  (small F) are not drowned by the first ones
     "image"     : squared error between u_T and the ground-truth image
     """
-    kkt, _, x_hist = model(functions)
+    kkt, _, x_hist = model(functions, keep_history=loss in ("objective_traj", "objective_log"))
     if loss == "kkt":
         return kkt[-1]
     if loss == "objective":
         return functions["objective"](x_hist[-1])
+    if loss == "objective_traj":
+        return torch.stack([functions["objective"](x) for x in x_hist]).mean()
+    if loss == "objective_log":
+        return torch.stack([functions["objective"](x) for x in x_hist]).log().mean()
     if loss == "image":
         return (x_hist[-1][0] - clean).pow(2).sum()
     raise ValueError(f"unknown loss {loss!r}")
