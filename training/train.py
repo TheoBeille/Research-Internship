@@ -4,37 +4,19 @@ import torch
 from tqdm import tqdm
 
 
-def final_loss(model, clean, functions, loss):
-    """Loss at the last unrolled iterate x_T = (u_T, w_T, p_T, q_T).
+def final_loss(model, functions):
+    """TGV2 objective F(u_T, w_T) at the output of the last unrolled iteration."""
+    _, _, x_hist = model(functions)
+    return functions["objective"](x_hist[-1])
 
-    "kkt"       : KKT residual ||(A + C)(x_T)||
-    "objective" : TGV2 objective F(u_T, w_T), the quantity plotted in the paper
-    "objective_traj" : mean of F(u_n, w_n) over n = 1..T, so that every iterate
-                  of the window is pushed down, not only the last one
-    "objective_log"  : mean of log F(u_n, w_n) over n = 1..T: the same relative
-                  decrease counts the same at every iterate, so the late iterates
-                  (small F) are not drowned by the first ones
-    "image"     : squared error between u_T and the ground-truth image
+
+def train(model, train_data, val_data=None, n_epochs=40, lr=1e-3, accum=8, device="cuda",
+          grad_clip=1.0, ckpt_path=None):
     """
-    kkt, _, x_hist = model(functions, keep_history=loss in ("objective_traj", "objective_log"))
-    if loss == "kkt":
-        return kkt[-1]
-    if loss == "objective":
-        return functions["objective"](x_hist[-1])
-    if loss == "objective_traj":
-        return torch.stack([functions["objective"](x) for x in x_hist]).mean()
-    if loss == "objective_log":
-        return torch.stack([functions["objective"](x) for x in x_hist]).log().mean()
-    if loss == "image":
-        return (x_hist[-1][0] - clean).pow(2).sum()
-    raise ValueError(f"unknown loss {loss!r}")
-
-
-def train(model, train_data, val_data=None, n_epochs=200, lr=1e-3, device="cuda",
-          grad_clip=1.0, ckpt_path=None, loss="kkt"):
-    """
-    Train the unrolled model on a loss at the last unrolled iterate
-    (see final_loss).
+    Train the unrolled model on the objective at the last unrolled iteration.
+    The gradients of `accum` slices are averaged before every optimizer step
+    (with a single slice per step the weights follow the last slices seen and
+    the validation loss swings from one epoch to the next).
 
     train_data, val_data : lists of (initial_state, clean, functions)
 
@@ -44,7 +26,6 @@ def train(model, train_data, val_data=None, n_epochs=200, lr=1e-3, device="cuda"
     of the best epoch.
 
     Returns (model, train_loss_history, val_loss_history).
-    All metrics are shown in the progress bars.
     """
     def copy_weights():
         return {k: v.detach().clone() for k, v in model.state_dict().items()}
@@ -62,27 +43,27 @@ def train(model, train_data, val_data=None, n_epochs=200, lr=1e-3, device="cuda"
 
         model.train()
         losses = []
+        optimizer.zero_grad()
         shuffled = random.sample(train_data, len(train_data))
         batch_bar = tqdm(shuffled, desc=f"Epoch {epoch + 1}/{n_epochs}", leave=False)
 
-        for _, clean, functions in batch_bar:
-            optimizer.zero_grad()
-            value = final_loss(model, clean, functions, loss)
-
+        for _, _, functions in batch_bar:
+            value = final_loss(model, functions)
             if not torch.isfinite(value):
-                tqdm.write(f"[Warning] non-finite loss at epoch {epoch}, skipping batch")
+                tqdm.write(f"[Warning] non-finite loss at epoch {epoch}, skipping slice")
                 continue
-
-            value.backward()
-            grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
-            # a single non-finite gradient would turn every weight into NaN
-            if not torch.isfinite(grad_norm):
-                tqdm.write(f"[Warning] non-finite gradient at epoch {epoch}, skipping batch")
-                continue
-            optimizer.step()
-
+            (value / accum).backward()
             losses.append(value.item())
             batch_bar.set_postfix(loss=f"{losses[-1]:.4f}")
+
+            if len(losses) % accum == 0:
+                grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
+                # a single non-finite gradient would turn every weight into NaN
+                if torch.isfinite(grad_norm):
+                    optimizer.step()
+                else:
+                    tqdm.write(f"[Warning] non-finite gradient at epoch {epoch}, skipping step")
+                optimizer.zero_grad()
 
         scheduler.step()
         train_loss_hist.append(sum(losses) / len(losses) if losses else float("nan"))
@@ -91,8 +72,7 @@ def train(model, train_data, val_data=None, n_epochs=200, lr=1e-3, device="cuda"
         if val_data is not None:
             model.eval()
             with torch.no_grad():
-                val = [final_loss(model, clean, functions, loss).item()
-                       for _, clean, functions in val_data]
+                val = [final_loss(model, functions).item() for _, _, functions in val_data]
             val_loss_hist.append(sum(val) / len(val))
             metrics["val"] = f"{val_loss_hist[-1]:.4f}"
 
@@ -103,7 +83,7 @@ def train(model, train_data, val_data=None, n_epochs=200, lr=1e-3, device="cuda"
         if ckpt_path is not None:
             torch.save({"model": best_weights, "train_loss_history": train_loss_hist,
                         "val_loss_history": val_loss_hist, "best_loss": best_loss,
-                        "primal_step": model.params.primal_step, "loss": loss}, ckpt_path)
+                        "primal_step": model.params.primal_step}, ckpt_path)
 
         metrics["best"] = f"{best_loss:.4f}"
         metrics["lr"] = f"{scheduler.get_last_lr()[0]:.1e}"

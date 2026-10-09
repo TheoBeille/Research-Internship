@@ -68,24 +68,30 @@ def random_direction(seed=0):
     return direction
 
 
-def run_fbs(inst, T, direction=None, use_safeguard=True, snapshots=(10,), n_timing=20):
+def run_fbs(inst, T, direction=None, use_safeguard=True, restart=True, snapshots=(10,),
+            n_timing=20):
     """
     Run T iterations of the forward-backward scheme on the test instance.
 
     direction : None (zero deviations), a trained UnrolledFBS model, or a
                 function such as random_direction()
+    restart   : with a trained model, stop the deviations after its T
+                iterations and restart the classical scheme from p_T. False
+                keeps the deviations at every iteration (no-safeguard
+                ablation: shows the divergence).
 
     Returns a dict with, per iteration, "kkt", "objective" and "psnr", the
     reconstructions "images" {iteration: image} at the requested iterations
     and at the last one, and "ms_per_iter" (measured on a separate short run
     without any monitoring).
     """
-    alpha = 0.99
+    alpha, restart_at = 0.99, None
     if isinstance(direction, UnrolledFBS):
+        restart_at = direction.T if restart else None
         direction, alpha = direction.dev_net, direction.alpha
     args = (inst["functions"], inst["params"], inst["shapes"])
     kwargs = dict(device=inst["device"], direction=direction, alpha=alpha,
-                  use_safeguard=use_safeguard)
+                  use_safeguard=use_safeguard, restart=restart_at)
 
     with torch.no_grad():
         kkt, _, x_hist = unroll(*args, T, keep_history=True, progress=True, **kwargs)

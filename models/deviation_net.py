@@ -7,25 +7,27 @@ class DeviationNet(nn.Module):
     """
     Small convolutional network (PyTorch port of the `convnet` of Banert et al.):
 
-        InstanceNorm -> [Conv3x3 -> InstanceNorm -> LeakyReLU] * n_blocks -> Conv3x3
+        InstanceNorm -> [Conv3x3 (dilated) -> InstanceNorm -> LeakyReLU] * 5 -> Conv3x3
+
+The dilations (1, 2, 4, 8, 1) give a receptive field of about 35x35 pixels.
 
     It reads the primal blocks (u, w) of seven state quantities and predicts
     the primal blocks of the two deviation directions. The dual blocks (p, q)
     of the deviations are set to zero.
     """
 
-    def __init__(self, n_channels, hidden=32, n_blocks=2):
+    def __init__(self, n_channels, hidden=32, dilations=(1, 2, 4, 8, 1)):
         super().__init__()
         self.n_channels = n_channels          # channels of (u, w) = 3
-        self.n_layers = n_blocks
+        self.n_layers = len(dilations)
 
         self.in_norm = nn.InstanceNorm2d(7 * n_channels, affine=True)
 
         # stored flat as conv, norm, conv, norm, ...
         layers = []
         ch = 7 * n_channels
-        for _ in range(n_blocks):
-            layers.append(nn.Conv2d(ch, hidden, kernel_size=3, padding=1))
+        for d in dilations:
+            layers.append(nn.Conv2d(ch, hidden, kernel_size=3, padding=d, dilation=d))
             layers.append(nn.InstanceNorm2d(hidden, affine=True))
             ch = hidden
         self.layers = nn.ModuleList(layers)
